@@ -3,13 +3,13 @@
  * ExchangeRate-API), with the same arithmetic the server uses (`officialCross`, `marketCross`). For an app that has no
  * exchange-rates-uy server of its own.
  *
- * What it cannot do without one: the market's past days (the source only gives today's table; a server keeps each
- * day), and the BCU from a browser (it allows no other page to call it). The pairs and currencies are the ones it is
- * given, not a panel's.
+ * The market's past days come from fawazahmed0's exchange-api (`pastMarketTable`, back to 2 March 2024), a day per
+ * request, so its market history takes a year at most per call. What it cannot do: the BCU from a browser (it allows
+ * no other page to call it). The pairs and currencies are the ones it is given, not a panel's.
  */
 import { BCU_CURRENCIES, BCU_PAGE, BCU_QUOTE, bcuBetween, bcuCode, bcuOn, type BcuReading } from "./rates/bcu.ts";
 import { marketCross, officialCross } from "./rates/convert.ts";
-import { MARKET_CREDIT, marketTable } from "./rates/market.ts";
+import { PAST_MARKET_FROM, marketCredit, marketTable, pastMarketTable, type MarketTable } from "./rates/market.ts";
 import { currencyName, currencyPlaces, currencySymbol } from "./rates/money.ts";
 import { montevideoNow, stamp } from "./rates/time.ts";
 import type { CurrencySpec } from "./rates/types.ts";
@@ -52,11 +52,17 @@ export function createDirectClient(o: DirectOptions = {}): RatesClient {
     throw new RatesError(502, "the BCU published nothing in the week before that day");
   }
 
-  async function table(date: string | undefined) {
+  /** Today's table from ExchangeRate-API; a day before it, that day's from the past dataset. */
+  async function table(date: string | undefined): Promise<MarketTable> {
     const t = await marketTable().catch(() => null);
-    if (!t) throw new RatesError(502, "ExchangeRate-API answered no table");
-    if (date && date < t.day) throw new RatesError(400, "the market's past days need a server: the source only gives today's");
-    return t;
+    if (!date || (t && date >= t.day)) {
+      if (!t) throw new RatesError(502, "ExchangeRate-API answered no table");
+      return t;
+    }
+    if (date < PAST_MARKET_FROM) throw new RatesError(404, `the market's past begins on ${PAST_MARKET_FROM}`);
+    const past = await pastMarketTable(date).catch(() => null);
+    if (!past) throw new RatesError(502, `no market table for ${date}`);
+    return past;
   }
 
   const official = async (date?: string): Promise<Official> => {
@@ -68,7 +74,8 @@ export function createDirectClient(o: DirectOptions = {}): RatesClient {
   const market = async (date?: string): Promise<Market> => {
     const asked = checked(date) ?? today();
     const t = await table(asked === today() ? undefined : asked);
-    return { date: asked, day: t.day, perUsd: { ...t.perUsd }, base: "USD", credit: { ...MARKET_CREDIT } };
+    const source = t.source ?? "live";
+    return { date: asked, day: t.day, perUsd: { ...t.perUsd }, base: "USD", source, credit: { ...marketCredit(source) } };
   };
 
   return {
@@ -97,10 +104,24 @@ export function createDirectClient(o: DirectOptions = {}): RatesClient {
 
     async history(pair, opts = {}) {
       const [base, quote] = sides(pair);
-      if ((opts.source ?? "official") === "market") throw new RatesError(400, "the market's past days need a server: the source only gives today's");
       const to = checked(opts.to) ?? today();
       const from = checked(opts.from) ?? shift(to, -30);
       if (from > to) throw new RangeError("from comes before to");
+      if ((opts.source ?? "official") === "market") {
+        // A table per day, eight at a time; a year at most, since each day is a request.
+        if (Date.parse(to) - Date.parse(from) > 366 * 86_400_000) throw new RatesError(400, "without a server, a year of the market at most at once");
+        const days: string[] = [];
+        for (let d = from < PAST_MARKET_FROM ? PAST_MARKET_FROM : from; d <= to; d = shift(d, 1)) days.push(d);
+        const out: HistoryDay[] = [];
+        for (let i = 0; i < days.length; i += 8) {
+          const tables = await Promise.all(days.slice(i, i + 8).map((d) => table(d === today() ? undefined : d).catch(() => null)));
+          for (const t of tables) {
+            const rate = t ? marketCross(t.perUsd, base, quote) : null;
+            if (t && rate !== null && !out.some((x) => x.day === t.day)) out.push({ day: t.day, buy: rate, sell: rate, source: t.source ?? "live" });
+          }
+        }
+        return out.sort((x, y) => x.day.localeCompare(y.day));
+      }
       const wanted = specs([base, quote]);
       const byDay = new Map<string, BcuReading>();
       // One currency and one year at a time: the bank refuses wider ranges.

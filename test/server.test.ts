@@ -5,7 +5,7 @@ import { createExchangeRates, type Sql } from "../src/server.ts";
 import { openSqlite } from "../src/sqlite.ts";
 import { pgSql } from "../src/postgres.ts";
 import { lambdaHandler } from "../src/lambda.ts";
-import { bcuAnswer, dato, fakeFetch, marketAnswer } from "./fixtures.ts";
+import { bcuAnswer, dato, fakeFetch, marketAnswer, pastAnswer } from "./fixtures.ts";
 
 const TOKEN = "test-token";
 
@@ -213,4 +213,53 @@ test("access: only the allowed origins, the server's own page and the keys read 
   assert.equal((await call({ "x-api-key": "k-123" })).status, 200);
   assert.equal((await call({ "x-api-key": "k-124" })).status, 403);
   sql.close();
+});
+
+both("the market's past: a day asked for is filled in from the past dataset, and the ticks fill the rest, newest first", async (setup) => {
+  const { app, get } = await setup();
+  const asked: string[] = [];
+  const restore = fakeFetch(
+    () => bcuAnswer([dato(2225, "2026-11-24", 39.5, 41.9)]),
+    () => marketAnswer({ UYU: 40.5, EUR: 0.86 }),
+    (day) => {
+      asked.push(day);
+      return day === "2026-11-19" ? null : pastAnswer(day, { UYU: 40 + Number(day.slice(8)) / 100, EUR: 0.9 });
+    },
+  );
+  try {
+    await app.read();
+    const live = await get("/api/market");
+    assert.equal(live.body.day, "2026-11-23", "the table's own day, the evening before in Montevideo");
+    assert.equal(live.body.source, "live");
+    assert.equal(live.body.credit.label, "Rates By Exchange Rate API");
+
+    const past = await get("/api/market?date=2025-06-15");
+    assert.equal(past.status, 200);
+    assert.equal(past.body.day, "2025-06-15");
+    assert.equal(past.body.source, "past");
+    assert.equal(past.body.credit.href, "https://github.com/fawazahmed0/exchange-api");
+    assert.equal(past.body.perUsd.UYU, 40.15);
+    assert.equal(past.body.perUsd.BTC, undefined, "only ISO currencies");
+    assert.equal((await get("/api/convert?amount=10&from=USD&to=UYU&date=2025-06-15")).body.result, 401.5);
+    assert.equal((await get("/api/market?date=2024-01-10")).status, 404, "before the dataset begins");
+    const after = asked.length;
+    await get("/api/market?date=2025-06-15");
+    assert.equal(asked.length, after, "a day filled in is kept");
+
+    // Two days per tick, back from the newest live day; a day the dataset lacks is skipped.
+    const first = await app.tick(new Date("2026-11-25T23:00:00Z"));
+    assert.ok(first.includes("market-past:2026-11-22,2026-11-21"), first.join(" "));
+    const second = await app.tick(new Date("2026-11-25T23:15:00Z"));
+    assert.ok(second.includes("market-past:2026-11-20"), second.join(" "));
+    const third = await app.tick(new Date("2026-11-25T23:30:00Z"));
+    assert.ok(third.includes("market-past:2026-11-18,2026-11-17"), third.join(" "));
+    const h = await get("/api/pairs/USD-UYU/history?source=market&from=2026-11-17&to=2026-11-24");
+    assert.deepEqual(h.body.days.map((d: any) => [d.day, d.source]), [
+      ["2026-11-17", "past"], ["2026-11-18", "past"], ["2026-11-20", "past"], ["2026-11-21", "past"],
+      ["2026-11-22", "past"], ["2026-11-23", "live"],
+    ]);
+    assert.equal(h.body.credits.past.label, "Rates by fawazahmed0/exchange-api");
+  } finally {
+    restore();
+  }
 });

@@ -1,11 +1,11 @@
 import { BCU_PAGE, BCU_QUOTE, bcuCode } from "../rates/bcu.ts";
 import { marketCross, officialCross } from "../rates/convert.ts";
-import { MARKET_CREDIT } from "../rates/market.ts";
+import { MARKET_CREDIT, PAST_MARKET_CREDIT, marketCredit } from "../rates/market.ts";
 import { currencyName, currencyPlaces, currencySymbol, everyCurrency, isKnownCurrency } from "../rates/money.ts";
-import { backfill, localTime, readMarket, readOfficial, type Schedule } from "./read.ts";
+import { backfill, localTime, marketFor, readMarket, readOfficial, type Schedule } from "./read.ts";
 import type { Sql } from "./sql.ts";
 import {
-  currencies, freshest, history, marketOn, officialOn, orderPairs, pairs, reversePair, runs, saveCurrency, savePair,
+  currencies, freshest, history, officialOn, orderPairs, pairs, reversePair, runs, saveCurrency, savePair,
   type Pair,
 } from "./store.ts";
 
@@ -109,7 +109,7 @@ export function describe(c: { iso: string; symbol?: string; active?: boolean }, 
 
 /** Each pair with its rate on `day` from both sources. */
 export async function pairRates(sql: Sql, list: readonly Pair[], day: string) {
-  const [official, market] = await Promise.all([officialOn(sql, day), marketOn(sql, day)]);
+  const [official, market] = await Promise.all([officialOn(sql, day), marketFor(sql, day)]);
   return list.map((p) => {
     const o = official ? officialCross(official.perLocal, official.published, p.base, p.quote) : null;
     const m = market ? marketCross(market.perUsd, p.base, p.quote) : null;
@@ -150,7 +150,7 @@ export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promi
     case "":
       return reply({
         endpoints: ["currencies", "pairs", "pairs/USD-UYU/history", "official", "market", "convert", "status"].map((e) => `${opts.base}/${e}`),
-        credits: { official: BCU_PAGE, market: MARKET_CREDIT },
+        credits: { official: BCU_PAGE, market: MARKET_CREDIT, pastMarket: PAST_MARKET_CREDIT },
       }, 200, cache);
 
     case "/currencies":
@@ -165,8 +165,8 @@ export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promi
     }
 
     case "/market": {
-      const m = await marketOn(sql, day);
-      return m ? reply({ date: day, ...m, base: "USD", credit: MARKET_CREDIT }, 200, cache) : refuse("no market table up to that day", 404);
+      const m = await marketFor(sql, day);
+      return m ? reply({ date: day, day: m.day, perUsd: m.perUsd, base: "USD", source: m.source, credit: marketCredit(m.source) }, 200, cache) : refuse("no market table up to that day", 404);
     }
 
     case "/convert": {
@@ -184,7 +184,7 @@ export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promi
         const rate = side === "mid" ? (s.buy + s.sell) / 2 : s[side];
         return reply({ amount, from, to, date: day, day: o.day, source, side, rate, result: amount * rate }, 200, cache);
       }
-      const m = await marketOn(sql, day);
+      const m = await marketFor(sql, day);
       const rate = m ? marketCross(m.perUsd, from, to) : null;
       if (rate === null || !m) return refuse(`no market rate for ${from}/${to}`, 404);
       return reply({ amount, from, to, date: day, day: m.day, source, rate, result: amount * rate }, 200, cache);
@@ -203,7 +203,9 @@ export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promi
     const from = q("from") ?? shift(to, -30);
     if (!isDay(from) || !isDay(to) || from > to) return refuse("from and to are YYYY-MM-DD, from first");
     if (Date.parse(to) - Date.parse(from) > 3700 * 86_400_000) return refuse("ten years at most at once");
-    return reply({ pair: `${base}/${quote}`, source, from, to, days: await history(sql, source, base, quote, from, to) }, 200, cache);
+    const days = await history(sql, source, base, quote, from, to);
+    const credits = source === "market" ? { live: MARKET_CREDIT, past: PAST_MARKET_CREDIT } : undefined;
+    return reply({ pair: `${base}/${quote}`, source, from, to, days, ...(credits ? { credits } : {}) }, 200, cache);
   }
   return refuse("not found", 404);
 }

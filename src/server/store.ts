@@ -1,6 +1,6 @@
 import { BCU_QUOTE } from "../rates/bcu.ts";
 import { marketCross, officialCross, type Spread } from "../rates/convert.ts";
-import type { MarketTable } from "../rates/market.ts";
+import type { MarketSource, MarketTable } from "../rates/market.ts";
 import type { BcuReading } from "../rates/bcu.ts";
 import type { Sql } from "./sql.ts";
 
@@ -41,6 +41,8 @@ export interface OfficialDay {
 export interface MarketDay {
   day: string;
   perUsd: Record<string, number>;
+  /** Whose table: ExchangeRate-API's on its day, or a past day filled in (`pastMarketTable`). */
+  source: MarketSource;
 }
 
 export interface Run {
@@ -148,13 +150,15 @@ export async function keepOfficial(sql: Sql, readings: readonly BcuReading[]): P
 }
 
 export async function keepMarket(sql: Sql, table: MarketTable): Promise<number> {
+  const source = table.source ?? "live";
+  // A live table is the market's word on its day and replaces whatever was there; a past one only fills a gap.
+  const write = source === "live"
+    ? `insert into {market} (day, iso, per_usd, fetched_at, source) values (?, ?, ?, ?, ?)
+       on conflict (day, iso) do update set per_usd = excluded.per_usd, fetched_at = excluded.fetched_at, source = excluded.source`
+    : `insert into {market} (day, iso, per_usd, fetched_at, source) values (?, ?, ?, ?, ?) on conflict (day, iso) do nothing`;
   const rows = Object.entries(table.perUsd)
     .filter(([iso, v]) => /^[A-Z]{3}$/.test(iso) && Number(v) > 0)
-    .map(([iso, v]) => [
-      `insert into {market} (day, iso, per_usd, fetched_at) values (?, ?, ?, ?)
-       on conflict (day, iso) do update set per_usd = excluded.per_usd, fetched_at = excluded.fetched_at`,
-      [table.day, iso, Number(v), table.fetchedAt],
-    ] as const);
+    .map(([iso, v]) => [write, [table.day, iso, Number(v), table.fetchedAt, source]] as const);
   for (let i = 0; i < rows.length; i += 100) await sql.batch(rows.slice(i, i + 100));
   return rows.length;
 }
@@ -176,12 +180,32 @@ export async function officialOn(sql: Sql, day: string): Promise<OfficialDay | n
 
 /** The market's last table on or before `day`, or nothing. */
 export async function marketOn(sql: Sql, day: string): Promise<MarketDay | null> {
-  const rows = await sql.all<{ day: string; iso: string; per_usd: number }>(
-    `select day, iso, per_usd from {market} where day = (select max(day) from {market} where day <= ?)`,
+  const rows = await sql.all<{ day: string; iso: string; per_usd: number; source: string }>(
+    `select day, iso, per_usd, source from {market} where day = (select max(day) from {market} where day <= ?)`,
     [day],
   );
   if (!rows.length) return null;
-  return { day: rows[0]!.day, perUsd: Object.fromEntries([["USD", 1], ...rows.map((r) => [r.iso, r.per_usd] as const)]) };
+  return {
+    day: rows[0]!.day,
+    perUsd: Object.fromEntries([["USD", 1], ...rows.map((r) => [r.iso, r.per_usd] as const)]),
+    source: rows.some((r) => r.source === "live") ? "live" : "past",
+  };
+}
+
+/** The newest live market day kept, or nothing. */
+export async function newestLiveMarket(sql: Sql): Promise<string | null> {
+  const [row] = await sql.all<{ day: string | null }>(`select max(day) as day from {market} where source = 'live'`);
+  return row?.day ?? null;
+}
+
+/** A value kept in `{meta}`, or nothing. */
+export async function metaGet(sql: Sql, key: string): Promise<string | null> {
+  const [row] = await sql.all<{ value: string }>(`select value from {meta} where key = ?`, [key]);
+  return row?.value ?? null;
+}
+
+export async function metaSet(sql: Sql, key: string, value: string): Promise<void> {
+  await sql.run(`insert into {meta} (key, value) values (?, ?) on conflict (key) do update set value = excluded.value`, [key, value]);
 }
 
 /** One pair's rate per day between two days, from one source. */
@@ -192,17 +216,22 @@ export async function history(
   quote: string,
   from: string,
   to: string,
-): Promise<{ day: string; buy: number; sell: number }[]> {
+): Promise<{ day: string; buy: number; sell: number; source?: MarketSource }[]> {
   if (kind === "market") {
-    const rows = await sql.all<{ day: string; iso: string; per_usd: number }>(
-      `select day, iso, per_usd from {market} where iso in (?, ?) and day between ? and ? order by day`,
+    const rows = await sql.all<{ day: string; iso: string; per_usd: number; source: string }>(
+      `select day, iso, per_usd, source from {market} where iso in (?, ?) and day between ? and ? order by day`,
       [base, quote, from, to],
     );
-    const byDay = new Map<string, Record<string, number>>();
-    for (const r of rows) byDay.set(r.day, { ...(byDay.get(r.day) ?? { USD: 1 }), [r.iso]: r.per_usd });
-    return [...byDay].flatMap(([day, perUsd]) => {
-      const rate = marketCross(perUsd, base, quote);
-      return rate === null ? [] : [{ day, buy: rate, sell: rate }];
+    const byDay = new Map<string, { perUsd: Record<string, number>; live: boolean }>();
+    for (const r of rows) {
+      const d = byDay.get(r.day) ?? { perUsd: { USD: 1 }, live: false };
+      d.perUsd[r.iso] = r.per_usd;
+      d.live ||= r.source === "live";
+      byDay.set(r.day, d);
+    }
+    return [...byDay].flatMap(([day, d]) => {
+      const rate = marketCross(d.perUsd, base, quote);
+      return rate === null ? [] : [{ day, buy: rate, sell: rate, source: d.live ? "live" as const : "past" as const }];
     });
   }
   const rows = await sql.all<{ day: string; iso: string; buy: number; sell: number; usd: number | null }>(

@@ -1,6 +1,6 @@
 // swift-tools-version: 5.9
 // The Swift client of exchange-rates-uy (clients/swift): add this repository in Xcode or as
-// .package(url: "https://github.com/guillecura/exchange-rates-uy", from: "1.5.0").
+// .package(url: "https://github.com/guillecura/exchange-rates-uy", from: "1.6.0").
 import PackageDescription
 
 let package = Package(

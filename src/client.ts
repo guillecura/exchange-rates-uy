@@ -38,6 +38,9 @@ export interface Market {
   day: string;
   perUsd: Record<string, number>;
   base: "USD";
+  /** Whose table: ExchangeRate-API's, read on its day (`live`), or a day gone by from fawazahmed0's exchange-api (`past`). */
+  source?: "live" | "past";
+  /** Who to credit beside its figures (the `source`'s). */
   credit: { label: string; href: string };
 }
 
@@ -97,7 +100,7 @@ export type RatesClientOptions = ServerOptions | DirectOptions;
 export interface RatesClient {
   /** The bank's reading on `date` (the last on or before it; today by default). */
   official(date?: string): Promise<Official>;
-  /** The market's table on `date` (without a server, only today's). */
+  /** The market's table on `date`, back to 2 March 2024 (before then, a server's own if it kept one). */
   market(date?: string): Promise<Market>;
   /** The pairs, each with both rates, on `date`. */
   pairs(date?: string): Promise<PairRate[]>;
@@ -115,6 +118,8 @@ export interface HistoryDay {
   day: string;
   buy: number;
   sell: number;
+  /** For the market's history: whose table that day is (see `Market.source`). */
+  source?: "live" | "past";
 }
 
 export const DAY = /^\d{4}-\d{2}-\d{2}$/;

@@ -29,6 +29,8 @@ data class Market(
     val perUsd: Map<String, Double>,
     val base: String,
     val credit: Credit,
+    /** Whose table: ExchangeRate-API's on its day (`live`), or a past day from fawazahmed0's exchange-api (`past`). */
+    val source: String? = null,
 ) {
     /** Pesos (or any [local]) per unit of each currency: the local column over the currency's. */
     fun perLocal(local: String = "UYU"): Map<String, Double> {
@@ -60,7 +62,7 @@ data class Currency(val iso: String, val name: String, val symbol: String, val p
 
 /** One day of a pair's history. */
 @Serializable
-data class HistoryDay(val day: String, val buy: Double, val sell: Double)
+data class HistoryDay(val day: String, val buy: Double, val sell: Double, val source: String? = null)
 
 @Serializable
 data class Conversion(

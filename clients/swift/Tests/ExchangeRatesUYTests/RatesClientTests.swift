@@ -77,6 +77,10 @@ final class RatesClientTests: XCTestCase {
     func sources() {
         Stub.answer = { req in
             if req.url?.host == "cotizaciones.bcu.gub.uy" { return (200, RatesClientTests.bcu) }
+            if let url = req.url?.absoluteString, let r = url.range(of: #"currency-api@(\d{4}-\d{2}-\d{2})"#, options: .regularExpression) {
+                let day = String(url[r].dropFirst("currency-api@".count))
+                return day >= "2024-03-02" ? (200, #"{"date":"\#(day)","usd":{"usd":1,"uyu":40,"eur":0.9,"btc":0.00001,"1inch":2.6}}"#) : (404, "{}")
+            }
             return (200, #"{"result":"success","time_last_update_unix":1795478551,"rates":{"USD":1,"UYU":40.5,"EUR":0.86,"JPY":155}}"#)
         }
     }
@@ -103,11 +107,19 @@ final class RatesClientTests: XCTestCase {
         XCTAssertEqual(market.rate, 155 / 0.86, accuracy: 1e-9)
         let days = try await rates.history("USD/UYU", from: "2026-11-20", to: "2026-11-25")
         XCTAssertEqual(days.map(\.day), ["2026-11-24"])
+        let marketDays = try await rates.history("USD/UYU", from: "2026-11-21", to: "2026-11-24", source: .market)
+        XCTAssertEqual(marketDays.map(\.day), ["2026-11-21", "2026-11-22", "2026-11-23"])
+        XCTAssertEqual(marketDays.map(\.buy), [40, 40, 40.5])
+        XCTAssertEqual(marketDays.map(\.source), ["past", "past", "live"])
+        let past = try await rates.market(date: "2026-11-22")
+        XCTAssertEqual(past.source, "past")
+        XCTAssertNil(past.perUsd["BTC"], "only ISO currencies")
+        XCTAssertEqual(past.credit.label, "Rates by fawazahmed0/exchange-api")
         do {
-            _ = try await rates.history("USD/UYU", source: .market)
-            XCTFail("the market's history needs a server")
+            _ = try await rates.market(date: "2020-01-01")
+            XCTFail("before the dataset begins")
         } catch let e as RatesError {
-            XCTAssertEqual(e.status, 400)
+            XCTAssertEqual(e.status, 404)
         }
         let currencies = try await rates.currencies(lang: "es")
         XCTAssertEqual(currencies.map(\.iso), ["USD", "UYU", "EUR"])

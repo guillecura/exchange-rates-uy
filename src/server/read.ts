@@ -1,8 +1,8 @@
 import { bcuBetween, bcuCode } from "../rates/bcu.ts";
-import { marketTable } from "../rates/market.ts";
+import { PAST_MARKET_FROM, marketTable, pastMarketTable } from "../rates/market.ts";
 import type { CurrencySpec } from "../rates/types.ts";
 import type { Sql } from "./sql.ts";
-import { claim, currencies, keepMarket, keepOfficial, log } from "./store.ts";
+import { claim, currencies, freshest, keepMarket, keepOfficial, log, marketOn, metaGet, metaSet, type MarketDay } from "./store.ts";
 
 /**
  * The readings, and the clock that decides when they happen.
@@ -86,8 +86,60 @@ export async function readMarket(sql: Sql): Promise<{ day: string; rows: number 
   }
 }
 
-/** Reads whatever is due now: each source's latest slot of the day that has come and is not taken. */
-export async function tick(sql: Sql, now: Date, schedule: Schedule = DEFAULT_SCHEDULE): Promise<string[]> {
+/**
+ * The market's table for `day`. ExchangeRate-API only gives today's, so the days before the server
+ * started reading it, and a day a reading missed, are filled in from the past dataset
+ * (`pastMarketTable`) the first time they are asked for, and kept. A day after the newest table
+ * answers the newest (the market's table of today is built in the evening).
+ */
+export async function marketFor(sql: Sql, day: string): Promise<MarketDay | null> {
+  const m = await marketOn(sql, day);
+  if (m?.day === day || day < PAST_MARKET_FROM) return m;
+  const newest = (await freshest(sql)).market;
+  if (!newest || day >= newest) return m;
+  const t = await pastMarketTable(day).catch(() => null);
+  if (!t) return m;
+  await keepMarket(sql, t);
+  return marketOn(sql, day);
+}
+
+const PAST_CURSOR = "market_past_before";
+
+/**
+ * The market's past, a few days per tick, newest first, back to `PAST_MARKET_FROM`, so a pair's
+ * market history reaches back that far. Few per tick because each day is a table of every
+ * currency (a hundred and sixty rows), and a free database counts the rows written per day.
+ * Where it got to is kept in `{meta}`; a day the dataset lacks is skipped (asked for later,
+ * `marketFor` tries it again).
+ */
+export async function fillPastMarket(sql: Sql, perTick: number): Promise<string[]> {
+  if (!(perTick > 0)) return [];
+  const kept = await metaGet(sql, PAST_CURSOR);
+  if (kept !== null && kept <= PAST_MARKET_FROM) return [];
+  let cursor = kept ?? (await freshest(sql)).market;
+  if (!cursor) return [];
+  const filled: string[] = [];
+  const missing: string[] = [];
+  for (let n = 0; n < perTick; n += 1) {
+    const day = shift(cursor, -1);
+    if (day < PAST_MARKET_FROM) {
+      cursor = PAST_MARKET_FROM;
+      break;
+    }
+    const t = await pastMarketTable(day).catch(() => null);
+    if (t) {
+      await keepMarket(sql, t);
+      filled.push(day);
+    } else missing.push(day);
+    cursor = day;
+  }
+  await metaSet(sql, PAST_CURSOR, cursor);
+  if (filled.length || missing.length) await log(sql, "market-past", !missing.length, { filled, missing });
+  return filled;
+}
+
+/** Reads whatever is due now: each source's latest slot of the day that has come and is not taken; then a few past market days. */
+export async function tick(sql: Sql, now: Date, schedule: Schedule = DEFAULT_SCHEDULE, pastPerTick = 2): Promise<string[]> {
   const { day, hour, weekday } = localTime(now, schedule.timeZone);
   const done: string[] = [];
   for (const kind of ["official", "market"] as const) {
@@ -98,6 +150,8 @@ export async function tick(sql: Sql, now: Date, schedule: Schedule = DEFAULT_SCH
     await (kind === "official" ? readOfficial(sql, day) : readMarket(sql));
     done.push(`${kind}:${due}`);
   }
+  const past = await fillPastMarket(sql, pastPerTick).catch(() => []);
+  if (past.length) done.push(`market-past:${past.join(",")}`);
   return done;
 }
 

@@ -65,7 +65,11 @@ class RatesClientTest {
     private fun sources() {
         server.removeContext("/")
         server.createContext("/") { ex ->
-            val body = if (ex.requestURI.path.startsWith("/bcu")) {
+            val path = ex.requestURI.path
+            val body = if (path.startsWith("/past/")) {
+                val day = path.removePrefix("/past/")
+                """{"date":"$day","usd":{"usd":1,"uyu":40,"eur":0.9,"btc":0.00001,"1inch":2.6}}"""
+            } else if (path.startsWith("/bcu")) {
                 "<Envelope><status>1</status>" +
                     "<datoscotizaciones.dato><Fecha>2026-11-24</Fecha><Moneda>2225</Moneda><TCC>39.5</TCC><TCV>41.9</TCV></datoscotizaciones.dato>" +
                     "<datoscotizaciones.dato><Fecha>2026-11-24</Fecha><Moneda>1111</Moneda><TCC>44</TCC><TCV>47</TCV><ArbAct>1.16</ArbAct></datoscotizaciones.dato></Envelope>"
@@ -80,7 +84,7 @@ class RatesClientTest {
 
     private fun direct(): RatesClient {
         val root = "http://127.0.0.1:${server.address.port}"
-        return RatesClient.direct(Direct(listOf("USD/UYU", "EUR/USD"), emptyList(), 15_000, "$root/bcu", "$root/market"))
+        return RatesClient.direct(Direct(listOf("USD/UYU", "EUR/USD"), emptyList(), 15_000, "$root/bcu", "$root/market", { listOf("$root/past/$it") }))
     }
 
     @Test fun directOfficialAndPairs() = runBlocking {
@@ -102,8 +106,13 @@ class RatesClientTest {
         assertEquals(4190.0, rates.convert(100.0, "USD", "UYU", date = "2026-11-25", source = Source.OFFICIAL).result, 1e-9)
         assertEquals(155 / 0.86, rates.convert(1.0, "EUR", "JPY").rate, 1e-9)
         assertEquals(listOf("2026-11-24"), rates.history("USD/UYU", from = "2026-11-20", to = "2026-11-25").map { it.day })
-        val e = assertFailsWith<RatesException> { rates.history("USD/UYU", source = Source.MARKET) }
-        assertEquals(400, e.status)
+        val market = rates.history("USD/UYU", from = "2026-11-21", to = "2026-11-24", source = Source.MARKET)
+        assertEquals(listOf(Triple("2026-11-21", 40.0, "past"), Triple("2026-11-22", 40.0, "past"), Triple("2026-11-23", 40.5, "live")), market.map { Triple(it.day, it.buy, it.source) })
+        val past = rates.market("2026-11-22")
+        assertEquals("past", past.source)
+        assertEquals(null, past.perUsd["BTC"], "only ISO currencies")
+        assertEquals("Rates by fawazahmed0/exchange-api", past.credit.label)
+        assertEquals(404, assertFailsWith<RatesException> { rates.market("2020-01-01") }.status)
         assertEquals(listOf("USD", "UYU", "EUR"), rates.currencies("es").map { it.iso })
     }
 }

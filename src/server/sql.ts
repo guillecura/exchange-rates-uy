@@ -89,6 +89,8 @@ export const MIGRATIONS: readonly string[] = [
     detail text
   )`,
   `create index if not exists {log}_at on {log} (at)`,
+  // Whose table a market day is: 'live' (ExchangeRate-API, read on its day) or 'past' (a day gone by, filled in).
+  `alter table {market} add column source text not null default 'live'`,
 ];
 
 /** Brings a database up to the last entry of `MIGRATIONS`. Safe to call on every start. */

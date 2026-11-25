@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createRatesClient, perLocal, RatesError } from "../src/client.ts";
 import { createExchangeRates } from "../src/server.ts";
 import { openSqlite } from "../src/sqlite.ts";
-import { bcuAnswer, dato, fakeFetch, marketAnswer } from "./fixtures.ts";
+import { bcuAnswer, dato, fakeFetch, marketAnswer, pastAnswer } from "./fixtures.ts";
 
 test("the client reads a server as an app does: with its key, typed, the server's errors as RatesError", async () => {
   const sql = await openSqlite(":memory:");
@@ -34,6 +34,7 @@ test("without a server the client reads the sources itself, with the server's ar
   const restore = fakeFetch(
     () => bcuAnswer([dato(2225, "2026-11-24", 39.5, 41.9), dato(1111, "2026-11-24", 44, 47, 1.16)]),
     () => marketAnswer({ UYU: 40.5, EUR: 0.86, JPY: 155 }),
+    (day) => (day >= "2026-11-20" ? pastAnswer(day, { UYU: 40, EUR: 0.9 }) : null),
   );
   try {
     const rates = createRatesClient({ pairs: ["USD/UYU", "EUR/USD"] });
@@ -47,8 +48,14 @@ test("without a server the client reads the sources itself, with the server's ar
     assert.equal((await rates.convert({ amount: 1, from: "EUR", to: "JPY" })).rate, 155 / 0.86);
     assert.equal((await rates.convert({ amount: 100, from: "USD", to: "UYU", source: "official", date: "2026-11-25" })).result, 4190);
     assert.deepEqual((await rates.history("USD/UYU", { from: "2026-11-20", to: "2026-11-25" })).map((d) => d.day), ["2026-11-24"]);
-    await assert.rejects(rates.history("USD/UYU", { source: "market" }), (e) => e instanceof RatesError && e.status === 400);
-    await assert.rejects(rates.market("2020-01-01"), (e) => e instanceof RatesError && e.status === 400);
+    const market = await rates.history("USD/UYU", { source: "market", from: "2026-11-19", to: "2026-11-23" });
+    assert.deepEqual(market.map((d) => [d.day, d.buy, d.source]), [
+      ["2026-11-20", 40, "past"], ["2026-11-21", 40, "past"], ["2026-11-22", 40, "past"], ["2026-11-23", 40.5, "live"],
+    ]);
+    const past = await rates.market("2026-11-21");
+    assert.equal(past.source, "past");
+    assert.equal(past.credit.label, "Rates by fawazahmed0/exchange-api");
+    await assert.rejects(rates.market("2020-01-01"), (e) => e instanceof RatesError && e.status === 404);
     assert.deepEqual((await rates.currencies("es")).map((c) => c.iso), ["USD", "UYU", "EUR"]);
   } finally {
     restore();

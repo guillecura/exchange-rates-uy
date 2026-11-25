@@ -46,6 +46,12 @@ export interface ExchangeRatesOptions {
   cronSecret?: string;
   /** When each source is read: which hours, which weekdays, in which time zone. */
   schedule?: Schedule;
+  /**
+   * How many of the market's past days each tick fills in, newest first, back to 2 March 2024 (`fillPastMarket`); 0
+   * turns it off. 2 by default: each day is a table of every currency (about 160 rows), which keeps a free database's
+   * daily writes low, and the past is complete within a week. A day asked for before then is filled in at once.
+   */
+  pastMarketPerTick?: number;
   /** What a new, empty database starts with; the panel and the admin API change it after. */
   seed?: { currencies: readonly string[]; pairs: readonly string[] };
   /** The pages' title, tagline, footer and language. */
@@ -108,7 +114,7 @@ export function createExchangeRates(o: ExchangeRatesOptions) {
   const authorize = o.authorize ?? isAdmin;
   const mayTick = async (req: Request) => (!!o.cronSecret && !!bearer(req) && same(bearer(req), o.cronSecret)) || isAdmin(req) || (!!o.authorize && (await o.authorize(req)));
   const adminOn = Boolean(o.adminToken || o.authorize);
-  const runTick = (now = new Date()) => prepare().then(() => tick(sql, now, schedule));
+  const runTick = (now = new Date()) => prepare().then(() => tick(sql, now, schedule, o.pastMarketPerTick ?? 2));
 
   /** The endpoint a path is, without its values (`/api/pairs/USD-UYU/history` is `pairs/history`). */
   const route = (path: string) => {
