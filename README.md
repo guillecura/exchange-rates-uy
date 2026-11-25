@@ -2,7 +2,7 @@
 
 **Uruguay's exchange rates, on your own backend.** The **official** rate (Banco Central del Uruguay: buying and selling, every working day) and the **market** rate (ExchangeRate-API: every currency, every day), any pair between the currencies you choose, read on the schedule you choose, served by an API, a public page with a converter, and a panel to add currencies and pairs.
 
-**Demo: [fx.whitebear.io](https://fx.whitebear.io)** (its API is [fx.whitebear.io/api](https://fx.whitebear.io/api)).
+**Demo: [rates.whitebear.io](https://rates.whitebear.io)**, Whitebear's rates tool, running on this package.
 
 ```sh
 npx exchange-rates-uy serve
@@ -110,7 +110,7 @@ npx wrangler secret put ADMIN_TOKEN
 npx wrangler deploy
 ```
 
-The free plan is plenty. This is how [fx.whitebear.io](https://fx.whitebear.io) runs. See [`examples/cloudflare`](examples/cloudflare).
+The free plan is plenty. This is how [rates.whitebear.io](https://rates.whitebear.io) runs. See [`examples/cloudflare`](examples/cloudflare).
 
 ### On Supabase
 
@@ -174,7 +174,7 @@ Any hours and any days. Whatever runs it only has to call `tick` often enough (e
 
 ## The API
 
-`GET`, open to any origin, cached five minutes. `date=YYYY-MM-DD` reads another day: the last reading on or before it. Days are Montevideo's. The demo answers all of these: try [fx.whitebear.io/api/pairs](https://fx.whitebear.io/api/pairs).
+`GET`, open to any origin unless [`access`](#who-may-read-the-api) says otherwise, cached five minutes. `date=YYYY-MM-DD` reads another day: the last reading on or before it. Days are Montevideo's. 
 
 | Endpoint | What |
 | --- | --- |
@@ -205,7 +205,7 @@ Two more, behind a secret:
 
 ## The panel
 
-At `/admin`, on with an `adminToken` (or an `authorize` function). Add a currency by searching its code, name or country; add a pair from two kept ones; retire, star, reverse and order pairs; set a currency's own mark (`US$` beside the peso's `$`); read now; load the BCU's history from any day. It asks for the token once per tab, or opens straight away when `authorize` lets the request in (your own session cookie, an access proxy), which is how fx.whitebear.io's sits behind Whitebear's sign-in.
+At `/admin`, on with an `adminToken` (or an `authorize` function). Add a currency by searching its code, name or country; add a pair from two kept ones; retire, star, reverse and order pairs; set a currency's own mark (`US$` beside the peso's `$`); read now; load the BCU's history from any day. It asks for the token once per tab, or opens straight away when `authorize` lets the request in (your own session cookie, an access proxy), which is how Whitebear's sits behind its own panel's sign-in.
 
 ## Options
 
@@ -223,10 +223,21 @@ createExchangeRates({                 // exchangeRatesWorker({…}), serve({…}
   publicPage: true,                   // false: the API only
   maxAge: 300,                        // the public API's cache, in seconds
   observe: (e) => …,                  // each API request: route, status, ms, origin, referer, user agent
+  access: { origins: [...], keys: [...] }, // who may read the API (open to everybody without it)
 });
 ```
 
-`observe` is how you count usage, log or send metrics: it is told of each API request once it is answered (`{ at, route, method, status, ms, origin, referer, userAgent }`, the route without values: `pairs/history`, not `pairs/USD-UYU/history`) and the answer never waits for it. On a Worker it keeps running after the answer through `ctx.waitUntil`. fx.whitebear.io counts its API's use per day, endpoint and client this way.
+### Who may read the API
+
+Open to everybody by default. With `access`, only:
+
+- the web **origins** listed (`"https://app.example.com"`), whose pages call it from a browser (CORS answers them and nobody else);
+- the server's **own page**, always;
+- a server-side caller with one of the **keys**, as `Authorization: Bearer <key>` or `X-Api-Key: <key>` (a server has no origin to check).
+
+What a browser says about where a call comes from stops other web pages from using your API; a script can write those headers itself, so the keys are what really close it. Behind `access` the answers are `private` for caches, so no shared cache hands one caller's answer to another.
+
+`observe` is how you count usage, log or send metrics: it is told of each API request once it is answered (`{ at, route, method, status, ms, origin, referer, userAgent }`, the route without values: `pairs/history`, not `pairs/USD-UYU/history`) and the answer never waits for it. On a Worker it keeps running after the answer through `ctx.waitUntil`. rates.whitebear.io counts its API's use per day, endpoint and client this way.
 
 ## The library
 
@@ -276,7 +287,7 @@ npm run build
 - Official rates: [Banco Central del Uruguay](https://www.bcu.gub.uy/Estadisticas-e-Indicadores/Paginas/Cotizaciones.aspx).
 - Market rates: [Rates By Exchange Rate API](https://www.exchangerate-api.com). Their free tier asks for this credit beside their figures, and the public page shows it: keep it if you build your own.
 
-Made by [Guille Cura](https://github.com/guillecura). It keeps the rates for [Whitebear](https://whitebear.io)'s products ([fx.whitebear.io](https://fx.whitebear.io)) and for [Umino](https://github.com/Umino-Trade).
+Made by [Guille Cura](https://github.com/guillecura). It keeps the rates for [Whitebear](https://whitebear.io)'s products ([rates.whitebear.io](https://rates.whitebear.io)) and for [Umino](https://github.com/Umino-Trade).
 
 ## License
 

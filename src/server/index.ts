@@ -12,13 +12,14 @@
  * `Request`/`Response` (Vercel, Netlify, Deno, Bun, Supabase's Edge Functions)
  * holds `fetch` as it is; the README has each one.
  */
-import { handleApi } from "./api.ts";
+import { handleApi, type Access } from "./api.ts";
 import { DEFAULT_SCHEDULE, backfill, readMarket, readOfficial, tick, localTime, type Schedule } from "./read.ts";
 import { migrate, withTables, type Sql } from "./sql.ts";
 import { seed } from "./store.ts";
 import { adminPage, pickLang, publicPage, type PageOptions } from "./ui.ts";
 
 export type { Sql } from "./sql.ts";
+export type { Access } from "./api.ts";
 export type { Schedule } from "./read.ts";
 export type { PageOptions } from "./ui.ts";
 export { DEFAULT_SCHEDULE } from "./read.ts";
@@ -53,6 +54,11 @@ export interface ExchangeRatesOptions {
   publicPage?: boolean;
   /** How long a public API answer may be cached, in seconds (300). */
   maxAge?: number;
+  /**
+   * Who may read the public API: the web `origins` whose pages may call it from a browser, and the `keys` a server sends
+   * (`Authorization: Bearer` or `X-Api-Key`). Open to everybody without it. The server's own page is always let in.
+   */
+  access?: Access;
   /**
    * Told of every API request once it is answered: which endpoint, how it went, how long it took and who asked
    * (`Origin`, `Referer`, `User-Agent`, as sent). For usage counts, logs, metrics. Never waited on by the answer.
@@ -117,7 +123,7 @@ export function createExchangeRates(o: ExchangeRatesOptions) {
     const started = Date.now();
     await prepare();
     const url = new URL(req.url);
-    const api = await handleApi(req, sql, { base, schedule, authorize, mayTick, tick: () => runTick(), maxAge: o.maxAge ?? 300 });
+    const api = await handleApi(req, sql, { base, schedule, authorize, mayTick, tick: () => runTick(), maxAge: o.maxAge ?? 300, access: o.access });
     if (api) {
       if (o.observe && req.method !== "OPTIONS") {
         const told = Promise.resolve()

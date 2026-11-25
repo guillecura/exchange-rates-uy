@@ -197,3 +197,20 @@ test("observe is told of each API request: its endpoint without values, its stat
   ]);
   sql.close();
 });
+
+test("access: only the allowed origins, the server's own page and the keys read the API", async () => {
+  const sql = await openSqlite(":memory:");
+  const app = createExchangeRates({ sql, access: { origins: ["https://garageapp.uy"], keys: ["k-123"] } });
+  const call = (headers: Record<string, string>) => app.fetch(new Request("http://rates.x/api/currencies", { headers }));
+  assert.equal((await call({})).status, 403, "nothing says who");
+  assert.equal((await call({ origin: "https://evil.example" })).status, 403);
+  const allowed = await call({ origin: "https://garageapp.uy" });
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get("access-control-allow-origin"), "https://garageapp.uy");
+  assert.equal((await call({ "sec-fetch-site": "same-origin" })).status, 200, "its own page");
+  assert.equal((await call({ origin: "http://rates.x" })).status, 200, "its own origin");
+  assert.equal((await call({ authorization: "Bearer k-123" })).status, 200);
+  assert.equal((await call({ "x-api-key": "k-123" })).status, 200);
+  assert.equal((await call({ "x-api-key": "k-124" })).status, 403);
+  sql.close();
+});

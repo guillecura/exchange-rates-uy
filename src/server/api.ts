@@ -37,24 +37,57 @@ export interface ApiOptions {
   authorize: (req: Request) => boolean | Promise<boolean>;
   /** How long a public answer may be cached, in seconds. */
   maxAge: number;
+  /** Who may read the public API; open to everybody without it. */
+  access?: Access;
 }
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type",
-};
+/**
+ * Who may read the API, when it is not for everybody.
+ *
+ * `origins`: the web origins (`https://app.example.com`) whose pages may call it from a browser; the server's own page
+ * calls it from its own origin and is always let in. `keys`: what a server-side caller (an app's backend, a cron) sends
+ * as `Authorization: Bearer <key>` or `X-Api-Key: <key>`, since a server has no origin.
+ *
+ * What a browser sends about where a call comes from (`Origin`, `Sec-Fetch-Site`) stops other web pages from using
+ * the API, but a script can write those headers itself: the keys are what close it.
+ */
+export interface Access {
+  origins?: readonly string[];
+  keys?: readonly string[];
+}
 
-export const json = (data: unknown, status = 200, cache = 0) =>
+/** Whether a request may read the API under `access`, and the origin to answer CORS with. */
+export function admitted(req: Request, access: Access | undefined): { ok: boolean; origin: string | null } {
+  const origin = req.headers.get("origin");
+  if (!access) return { ok: true, origin: "*" };
+  const own = new URL(req.url).origin;
+  const listed = !!origin && (origin === own || (access.origins ?? []).includes(origin));
+  const sameSite = req.headers.get("sec-fetch-site") === "same-origin";
+  const given = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "") || req.headers.get("x-api-key") || "";
+  const keyed = !!given && (access.keys ?? []).some((k) => k.length === given.length && k === given);
+  return { ok: listed || (!origin && sameSite) || keyed, origin: listed ? origin : null };
+}
+
+const cors = (origin: string | null): Record<string, string> => origin ? {
+  "Access-Control-Allow-Origin": origin,
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Api-Key",
+  ...(origin === "*" ? {} : { Vary: "Origin" }),
+} : {};
+const CORS = cors("*");
+
+export const jsonOut = (data: unknown, status = 200, cache = 0, origin: string | null = "*") =>
   new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": cache ? `public, max-age=${cache}` : "no-store",
-      ...CORS,
+      // Behind `access` an answer is per caller: no shared cache may hand it to another.
+      "Cache-Control": cache ? `${origin === "*" ? "public" : "private"}, max-age=${cache}` : "no-store",
+      ...cors(origin),
     },
   });
 
+const json = (data: unknown, status = 200, cache = 0) => jsonOut(data, status, cache);
 const fail = (error: string, status = 400) => json({ error }, status);
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -107,29 +140,33 @@ export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promi
     return json({ ok: true, read: await opts.tick() });
   }
   if (req.method !== "GET" && req.method !== "HEAD") return fail("method not allowed", 405);
+  const gate = admitted(req, opts.access);
+  if (!gate.ok) return jsonOut({ error: "this API is for its allowed sites and keys" }, 403, 0, null);
   const cache = opts.maxAge;
+  const reply = (data: unknown, status = 200, maxAge = 0) => jsonOut(data, status, maxAge, gate.origin);
+  const refuse = (error: string, status = 400) => reply({ error }, status);
 
   switch (path) {
     case "":
-      return json({
+      return reply({
         endpoints: ["currencies", "pairs", "pairs/USD-UYU/history", "official", "market", "convert", "status"].map((e) => `${opts.base}/${e}`),
         credits: { official: BCU_PAGE, market: MARKET_CREDIT },
       }, 200, cache);
 
     case "/currencies":
-      return json({ currencies: (await currencies(sql)).map((c) => describe(c, lang)) }, 200, cache);
+      return reply({ currencies: (await currencies(sql)).map((c) => describe(c, lang)) }, 200, cache);
 
     case "/pairs":
-      return json({ date: day, pairs: await pairRates(sql, await pairs(sql), day) }, 200, cache);
+      return reply({ date: day, pairs: await pairRates(sql, await pairs(sql), day) }, 200, cache);
 
     case "/official": {
       const o = await officialOn(sql, day);
-      return o ? json({ date: day, ...o, quote: BCU_QUOTE, source: BCU_PAGE }, 200, cache) : fail("no official reading up to that day", 404);
+      return o ? reply({ date: day, ...o, quote: BCU_QUOTE, source: BCU_PAGE }, 200, cache) : refuse("no official reading up to that day", 404);
     }
 
     case "/market": {
       const m = await marketOn(sql, day);
-      return m ? json({ date: day, ...m, base: "USD", credit: MARKET_CREDIT }, 200, cache) : fail("no market table up to that day", 404);
+      return m ? reply({ date: day, ...m, base: "USD", credit: MARKET_CREDIT }, 200, cache) : refuse("no market table up to that day", 404);
     }
 
     case "/convert": {
@@ -138,23 +175,23 @@ export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promi
       const to = (q("to") ?? "").toUpperCase();
       const source = q("source") === "official" ? "official" : "market";
       const side = q("side") === "buy" ? "buy" : q("side") === "mid" ? "mid" : "sell";
-      if (!Number.isFinite(amount)) return fail("amount is a number");
-      if (!isKnownCurrency(from) || !isKnownCurrency(to)) return fail("from and to are ISO currency codes");
+      if (!Number.isFinite(amount)) return refuse("amount is a number");
+      if (!isKnownCurrency(from) || !isKnownCurrency(to)) return refuse("from and to are ISO currency codes");
       if (source === "official") {
         const o = await officialOn(sql, day);
         const s = o ? officialCross(o.perLocal, o.published, from, to) : null;
-        if (!s || !o) return fail(`no official rate for ${from}/${to}`, 404);
+        if (!s || !o) return refuse(`no official rate for ${from}/${to}`, 404);
         const rate = side === "mid" ? (s.buy + s.sell) / 2 : s[side];
-        return json({ amount, from, to, date: day, day: o.day, source, side, rate, result: amount * rate }, 200, cache);
+        return reply({ amount, from, to, date: day, day: o.day, source, side, rate, result: amount * rate }, 200, cache);
       }
       const m = await marketOn(sql, day);
       const rate = m ? marketCross(m.perUsd, from, to) : null;
-      if (rate === null || !m) return fail(`no market rate for ${from}/${to}`, 404);
-      return json({ amount, from, to, date: day, day: m.day, source, rate, result: amount * rate }, 200, cache);
+      if (rate === null || !m) return refuse(`no market rate for ${from}/${to}`, 404);
+      return reply({ amount, from, to, date: day, day: m.day, source, rate, result: amount * rate }, 200, cache);
     }
 
     case "/status":
-      return json({ freshest: await freshest(sql), runs: await runs(sql, 20) });
+      return reply({ freshest: await freshest(sql), runs: await runs(sql, 20) });
   }
 
   const h = /^\/pairs\/([A-Za-z]{3})[-_/]([A-Za-z]{3})\/history$/.exec(path);
@@ -164,11 +201,11 @@ export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promi
     const source = q("source") === "market" ? "market" : "official";
     const to = q("to") ?? today;
     const from = q("from") ?? shift(to, -30);
-    if (!isDay(from) || !isDay(to) || from > to) return fail("from and to are YYYY-MM-DD, from first");
-    if (Date.parse(to) - Date.parse(from) > 3700 * 86_400_000) return fail("ten years at most at once");
-    return json({ pair: `${base}/${quote}`, source, from, to, days: await history(sql, source, base, quote, from, to) }, 200, cache);
+    if (!isDay(from) || !isDay(to) || from > to) return refuse("from and to are YYYY-MM-DD, from first");
+    if (Date.parse(to) - Date.parse(from) > 3700 * 86_400_000) return refuse("ten years at most at once");
+    return reply({ pair: `${base}/${quote}`, source, from, to, days: await history(sql, source, base, quote, from, to) }, 200, cache);
   }
-  return fail("not found", 404);
+  return refuse("not found", 404);
 }
 
 // MARK: Admin
