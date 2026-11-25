@@ -53,6 +53,24 @@ export interface ExchangeRatesOptions {
   publicPage?: boolean;
   /** How long a public API answer may be cached, in seconds (300). */
   maxAge?: number;
+  /**
+   * Told of every API request once it is answered: which endpoint, how it went, how long it took and who asked
+   * (`Origin`, `Referer`, `User-Agent`, as sent). For usage counts, logs, metrics. Never waited on by the answer.
+   */
+  observe?: (event: ApiEvent) => void | Promise<void>;
+}
+
+/** One API request, as `observe` is told of it. */
+export interface ApiEvent {
+  at: number;
+  /** The endpoint, without values: `pairs`, `pairs/history`, `convert`, `official`, `market`, `currencies`, `status`, `admin`, `tick`. */
+  route: string;
+  method: string;
+  status: number;
+  ms: number;
+  origin: string | null;
+  referer: string | null;
+  userAgent: string | null;
 }
 
 export const DEFAULT_SEED = {
@@ -86,11 +104,32 @@ export function createExchangeRates(o: ExchangeRatesOptions) {
   const adminOn = Boolean(o.adminToken || o.authorize);
   const runTick = (now = new Date()) => prepare().then(() => tick(sql, now, schedule));
 
-  async function fetch(req: Request): Promise<Response> {
+  /** The endpoint a path is, without its values (`/api/pairs/USD-UYU/history` is `pairs/history`). */
+  const route = (path: string) => {
+    const rest = path.slice(base.length).replace(/^\/+|\/+$/g, "");
+    return /^pairs\/[^/]+\/history$/.test(rest) ? "pairs/history" : rest.split("/")[0] || "index";
+  };
+
+  /**
+   * `wait`, where the platform has one (a Worker's `ctx.waitUntil`), keeps `observe` running after the answer is sent.
+   */
+  async function fetch(req: Request, wait?: (p: Promise<unknown>) => void): Promise<Response> {
+    const started = Date.now();
     await prepare();
     const url = new URL(req.url);
     const api = await handleApi(req, sql, { base, schedule, authorize, mayTick, tick: () => runTick(), maxAge: o.maxAge ?? 300 });
-    if (api) return api;
+    if (api) {
+      if (o.observe && req.method !== "OPTIONS") {
+        const told = Promise.resolve()
+          .then(() => o.observe!({
+            at: started, route: route(url.pathname), method: req.method, status: api.status, ms: Date.now() - started,
+            origin: req.headers.get("origin"), referer: req.headers.get("referer"), userAgent: req.headers.get("user-agent"),
+          }))
+          .catch((e) => console.error("exchange-rates-uy observe", e));
+        wait?.(told);
+      }
+      return api;
+    }
     const html = (body: string) => new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
     if (url.pathname === "/" && o.publicPage !== false) return html(publicPage(pickLang(req, page.lang), page, base));
     if (url.pathname === "/admin" && adminOn) return html(adminPage(pickLang(req, page.lang), page, base));

@@ -22,6 +22,7 @@ export interface ExchangeRatesEnv {
 }
 
 type Options = Omit<ExchangeRatesOptions, "sql" | "adminToken">;
+type Ctx = { waitUntil(p: Promise<unknown>): void };
 
 export function exchangeRatesWorker<E extends ExchangeRatesEnv>(options: Options | ((env: E) => Options) = {}) {
   let made: { env: E; app: ReturnType<typeof createExchangeRates> } | null = null;
@@ -33,10 +34,10 @@ export function exchangeRatesWorker<E extends ExchangeRatesEnv>(options: Options
     return made.app;
   };
   return {
-    fetch(req: Request, env: E): Promise<Response> {
-      return app(env).fetch(req);
+    fetch(req: Request, env: E, ctx?: Ctx): Promise<Response> {
+      return app(env).fetch(req, ctx ? (p) => ctx.waitUntil(p) : undefined);
     },
-    scheduled(event: { scheduledTime: number }, env: E, ctx: { waitUntil(p: Promise<unknown>): void }): void {
+    scheduled(event: { scheduledTime: number }, env: E, ctx: Ctx): void {
       ctx.waitUntil(app(env).tick(new Date(event.scheduledTime)));
     },
   };

@@ -181,3 +181,19 @@ test("AWS Lambda: an HTTP event is a request, a scheduled one a tick", async () 
     sql.close();
   }
 });
+
+test("observe is told of each API request: its endpoint without values, its status, who asked", async () => {
+  const sql = await openSqlite(":memory:");
+  const seen: any[] = [];
+  const app = createExchangeRates({ sql, observe: (e) => { seen.push(e); } });
+  const waits: Promise<unknown>[] = [];
+  await app.fetch(new Request("http://x/api/pairs/USD-UYU/history", { headers: { origin: "https://garageapp.uy", "user-agent": "Deno/2" } }), (p) => waits.push(p));
+  await app.fetch(new Request("http://x/api/convert?from=USD&to=ZZZ"), (p) => waits.push(p));
+  await app.fetch(new Request("http://x/"), (p) => waits.push(p));
+  await Promise.all(waits);
+  assert.deepEqual(seen.map((e) => [e.route, e.status, e.origin, e.userAgent]), [
+    ["pairs/history", 200, "https://garageapp.uy", "Deno/2"],
+    ["convert", 400, null, null],
+  ]);
+  sql.close();
+});

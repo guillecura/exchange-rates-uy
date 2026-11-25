@@ -222,8 +222,11 @@ createExchangeRates({                 // exchangeRatesWorker({…}), serve({…}
   page: { title, tagline, footer, lang: "es" },
   publicPage: true,                   // false: the API only
   maxAge: 300,                        // the public API's cache, in seconds
+  observe: (e) => …,                  // each API request: route, status, ms, origin, referer, user agent
 });
 ```
+
+`observe` is how you count usage, log or send metrics: it is told of each API request once it is answered (`{ at, route, method, status, ms, origin, referer, userAgent }`, the route without values: `pairs/history`, not `pairs/USD-UYU/history`) and the answer never waits for it. On a Worker it keeps running after the answer through `ctx.waitUntil`. fx.whitebear.io counts its API's use per day, endpoint and client this way.
 
 ## The library
 
