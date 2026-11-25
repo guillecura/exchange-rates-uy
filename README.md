@@ -287,7 +287,7 @@ let usd = try await rates.history("USD/UYU", from: "2026-01-01")
 
 ```kotlin
 // settings.gradle.kts: repositories { maven("https://jitpack.io") }
-// build.gradle.kts:    implementation("com.github.guillecura:exchange-rates-uy:v1.6.0")
+// build.gradle.kts:    implementation("com.github.guillecura:exchange-rates-uy:v1.6.1")
 import uy.exchangerates.RatesClient
 
 val rates = RatesClient("https://your-server/api", key = "…")           // with a server

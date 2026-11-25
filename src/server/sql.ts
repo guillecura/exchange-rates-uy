@@ -91,6 +91,10 @@ export const MIGRATIONS: readonly string[] = [
   `create index if not exists {log}_at on {log} (at)`,
   // Whose table a market day is: 'live' (ExchangeRate-API, read on its day) or 'past' (a day gone by, filled in).
   `alter table {market} add column source text not null default 'live'`,
+  // Until 1.6.1 a currency's arbitrage was kept as the bank sent it, which is units per dollar for all but these:
+  // kept from now on as dollars per unit, as `usd` always said.
+  `update {official} set usd = 1.0 / usd
+    where usd is not null and usd > 0 and iso not in ('USD', 'EUR', 'GBP', 'AUD', 'NZD', 'XDR', 'UP', 'UI')`,
 ];
 
 /** Brings a database up to the last entry of `MIGRATIONS`. Safe to call on every start. */

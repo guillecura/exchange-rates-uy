@@ -59,6 +59,9 @@ export const BCU_QUOTE = "UYU";
  * bank quotes joins the official reading the moment it is kept, with no code to
  * change.
  */
+/** The currencies whose arbitrage the bank publishes as dollars per unit; every other's comes as units per dollar. */
+export const ARB_DOLLARS_PER_UNIT: ReadonlySet<string> = new Set(["EUR", "GBP", "AUD", "NZD", "XDR", "UP", "UI"]);
+
 export const BCU_CURRENCIES: Readonly<Record<string, { code: number; name: string }>> = {
   XDR: { code: 2, name: "DER.ESP. DE GIRO" },
   AUD: { code: 105, name: "DOL. AUSTRALIANO" },
@@ -227,11 +230,18 @@ export async function bcuBetween(
      * own figure for that pair and not this module's arithmetic on two of its
      * others: where the two disagree by a hundredth, the published one is the one an
      * invoice will be read against.
+     *
+     * It comes the way each currency is quoted against the dollar in the market:
+     * dollars per unit for the euro, the pound, the Australian and New Zealand
+     * dollars, the SDR and the indexed units (`ARB_DOLLARS_PER_UNIT`), units per
+     * dollar for every other (1579 pesos argentinos, 5.94 reales). Kept always as
+     * dollars per unit, under `ISO/USD`.
      */
     const arb = Number(tag(block, "ArbAct"));
 
     if (Number.isFinite(arb) && arb > 0) {
-      reading.published[`${currency.iso}/USD`] = { buy: arb, sell: arb };
+      const usd = ARB_DOLLARS_PER_UNIT.has(currency.iso) ? arb : 1 / arb;
+      reading.published[`${currency.iso}/USD`] = { buy: usd, sell: usd };
     }
   }
 

@@ -34,6 +34,8 @@ internal class Direct(
             "HKD" to 5100, "KRW" to 5300, "RUB" to 5400, "COP" to 5500, "MYR" to 5600, "INR" to 5700, "SEK" to 5800,
             "CHF" to 5900, "VES" to 6200,
         )
+        /** The currencies whose arbitrage the bank publishes as dollars per unit (the package's ARB_DOLLARS_PER_UNIT). */
+        val ARB_DOLLARS_PER_UNIT = setOf("EUR", "GBP", "AUD", "NZD", "XDR", "UP", "UI")
         const val BCU_URL = "https://cotizaciones.bcu.gub.uy/wscotizaciones/servlet/awsbcucotizaciones"
         const val BCU_PAGE = "https://www.bcu.gub.uy/Estadisticas-e-Indicadores/Paginas/Cotizaciones.aspx"
         const val MARKET_URL = "https://open.er-api.com/v6/latest/USD"
@@ -60,6 +62,7 @@ internal class Direct(
         // The arithmetic (the package's officialCross and marketCross)
         fun officialCross(perLocal: Map<String, Spread>, published: Map<String, Spread>, base: String, quote: String): Spread? {
             published["$base/$quote"]?.let { return it }
+            published["$quote/$base"]?.takeIf { it.buy > 0 && it.sell > 0 }?.let { return Spread(1 / it.sell, 1 / it.buy) }
             val from = perLocal[base] ?: return null
             val to = perLocal[quote] ?: return null
             val buy = from.buy / to.sell
@@ -87,7 +90,11 @@ internal class Direct(
                 val sell = tag(block, "TCV")?.toDoubleOrNull() ?: continue
                 val r = byDay.getOrPut(day) { Reading(day, mutableMapOf("UYU" to Spread(1.0, 1.0)), mutableMapOf()) }
                 r.perLocal[iso] = Spread(buy, sell)
-                tag(block, "ArbAct")?.toDoubleOrNull()?.takeIf { it > 0 }?.let { r.published["$iso/USD"] = Spread(it, it) }
+                // The arbitrage comes as dollars per unit for these, units per dollar for the rest; kept as dollars per unit.
+                tag(block, "ArbAct")?.toDoubleOrNull()?.takeIf { it > 0 }?.let {
+                    val usd = if (iso in ARB_DOLLARS_PER_UNIT) it else 1 / it
+                    r.published["$iso/USD"] = Spread(usd, usd)
+                }
             }
             return byDay.values.toList()
         }

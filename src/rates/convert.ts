@@ -15,7 +15,7 @@ export interface Spread {
 /**
  * The official rate for one `base` in `quote`, out of the bank's reading.
  *
- * What the bank published already divided wins (`published`, keyed `BASE/QUOTE`).
+ * What the bank published already divided wins (`published`, keyed `BASE/QUOTE`), either way round.
  * Otherwise it is one division through the peso, which the bank quotes everything
  * against: the base's pesos over the quote's. Buying and selling stay on their own
  * sides of the division, so the spread of a derived pair is the two spreads
@@ -30,6 +30,9 @@ export function officialCross(
 ): Spread | null {
   const direct = published[`${base}/${quote}`];
   if (direct) return direct;
+  // The same pair the other way round: the bank's selling price becomes the buying one.
+  const reverse = published[`${quote}/${base}`];
+  if (reverse && reverse.buy > 0 && reverse.sell > 0) return { buy: 1 / reverse.sell, sell: 1 / reverse.buy };
 
   const from = perLocal[base];
   const to = perLocal[quote];

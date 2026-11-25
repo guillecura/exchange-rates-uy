@@ -25,6 +25,8 @@ struct Direct: Sendable {
         "TRY": 4400, "NOK": 4600, "PYG": 4800, "ISK": 4900, "HKD": 5100, "KRW": 5300, "RUB": 5400, "COP": 5500, "MYR": 5600,
         "INR": 5700, "SEK": 5800, "CHF": 5900, "VES": 6200,
     ]
+    /// The currencies whose arbitrage the bank publishes as dollars per unit (the package's ARB_DOLLARS_PER_UNIT).
+    static let arbDollarsPerUnit: Set<String> = ["EUR", "GBP", "AUD", "NZD", "XDR", "UP", "UI"]
     static let bcuURL = URL(string: "https://cotizaciones.bcu.gub.uy/wscotizaciones/servlet/awsbcucotizaciones")!
     static let bcuPage = "https://www.bcu.gub.uy/Estadisticas-e-Indicadores/Paginas/Cotizaciones.aspx"
     static let marketURL = URL(string: "https://open.er-api.com/v6/latest/USD")!
@@ -79,7 +81,11 @@ struct Direct: Sendable {
                   let buy = tag(b, "TCC").flatMap(Double.init), buy > 0, let sell = tag(b, "TCV").flatMap(Double.init) else { continue }
             var r = byDay[day] ?? Reading(day: day, perLocal: ["UYU": Spread(buy: 1, sell: 1)], published: [:])
             r.perLocal[iso] = Spread(buy: buy, sell: sell)
-            if let arb = tag(b, "ArbAct").flatMap(Double.init), arb > 0 { r.published["\(iso)/USD"] = Spread(buy: arb, sell: arb) }
+            // The arbitrage comes as dollars per unit for these, units per dollar for the rest; kept as dollars per unit.
+            if let arb = tag(b, "ArbAct").flatMap(Double.init), arb > 0 {
+                let usd = Direct.arbDollarsPerUnit.contains(iso) ? arb : 1 / arb
+                r.published["\(iso)/USD"] = Spread(buy: usd, sell: usd)
+            }
             byDay[day] = r
         }
         return byDay.values.sorted { $0.day < $1.day }
@@ -127,6 +133,7 @@ struct Direct: Sendable {
 
     static func officialCross(_ perLocal: [String: Spread], _ published: [String: Spread], _ base: String, _ quote: String) -> Spread? {
         if let direct = published["\(base)/\(quote)"] { return direct }
+        if let reverse = published["\(quote)/\(base)"], reverse.buy > 0, reverse.sell > 0 { return Spread(buy: 1 / reverse.sell, sell: 1 / reverse.buy) }
         guard let from = perLocal[base], let to = perLocal[quote] else { return nil }
         let buy = from.buy / to.sell
         return buy.isFinite && buy > 0 ? Spread(buy: buy, sell: from.sell / to.buy) : nil
