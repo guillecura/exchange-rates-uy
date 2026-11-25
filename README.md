@@ -34,6 +34,7 @@ No API keys and no accounts: both sources are free and open. It brings no databa
 - [The API](#the-api)
 - [The panel](#the-panel)
 - [Options](#options)
+- [Connect an app](#connect-an-app)
 - [The library](#the-library)
 - [How it keeps the rates](#how-it-keeps-the-rates)
 - [Credits](#credits)
@@ -238,6 +239,28 @@ Open to everybody by default. With `access`, only:
 What a browser says about where a call comes from stops other web pages from using your API; a script can write those headers itself, so the keys are what really close it. Behind `access` the answers are `private` for caches, so no shared cache hands one caller's answer to another.
 
 `observe` is how you count usage, log or send metrics: it is told of each API request once it is answered (`{ at, route, method, status, ms, origin, referer, userAgent }`, the route without values: `pairs/history`, not `pairs/USD-UYU/history`) and the answer never waits for it. On a Worker it keeps running after the answer through `ctx.waitUntil`. rates.whitebear.io counts its API's use per day, endpoint and client this way.
+
+## Connect an app
+
+To read a server (yours, or rates.whitebear.io with its key) from an app, there is a client for each platform, with the API's own names and types:
+
+| Platform | Package |
+| --- | --- |
+| JavaScript and TypeScript (Deno, Node, Workers, Supabase Edge Functions, browsers) | `exchange-rates-uy/client` |
+| iOS, macOS (Swift) | [exchange-rates-uy-swift](https://github.com/guillecura/exchange-rates-uy-swift) |
+| Android, JVM (Kotlin) | [exchange-rates-uy-kotlin](https://github.com/guillecura/exchange-rates-uy-kotlin) |
+
+```ts
+import { createRatesClient } from "exchange-rates-uy/client";
+
+const rates = createRatesClient({ baseUrl: "https://your-server/api", key: process.env.RATES_API_KEY });
+const bank = await rates.official();                       // the BCU's pesos per unit, buying and selling
+const market = await rates.market();                       // every currency per dollar
+const usd = await rates.history("USD/UYU", { from: "2026-01-01" });
+await rates.convert({ amount: 100, from: "USD", to: "UYU", source: "official" });
+```
+
+In Deno without npm, take the client straight from a release: `https://raw.githubusercontent.com/guillecura/exchange-rates-uy/v1.3.0/src/client.ts`. A key belongs on a server: in a phone app it can be read out of the binary, so there it only says which app is asking.
 
 ## The library
 
