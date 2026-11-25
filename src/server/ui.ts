@@ -8,8 +8,10 @@ import { MARKET_CREDIT } from "../rates/market.ts";
  *   /        the public page: the kept pairs with both rates, a converter for any
  *            two currencies, the credits the sources ask for, and the API.
  *   /admin   the panel: add and retire currencies and pairs, order and star the
- *            pairs, read now, load the bank's history. Asks for the admin token
- *            once and keeps it for the tab.
+ *            pairs, read now, load the bank's history. It asks the admin API
+ *            first with nothing: where `authorize` lets the request in (a session
+ *            cookie, an access proxy) it opens straight away; else it asks for the
+ *            token once and keeps it for the tab.
  *
  * Light and dark follow the system. English and Spanish follow the browser
  * (`?lang=` to pick one).
@@ -158,10 +160,10 @@ export function adminPage(lang: Lang, o: PageOptions): string {
 </div>`;
   const script = `
 var LANG=${JSON.stringify(lang)},T=${JSON.stringify(t)},KEY='cambista-token',token=sessionStorage.getItem(KEY)||'',D=null;
-function api(method,body){return fetch('/v1/admin?lang='+LANG,{method:method,headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){if(r.status===401)throw new Error('401');if(!r.ok)throw new Error(j.error||r.status);return j})})}
+function api(method,body){var h={'Content-Type':'application/json'};if(token)h.Authorization='Bearer '+token;return fetch('/v1/admin?lang='+LANG,{method:method,credentials:'same-origin',headers:h,body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){if(r.status===401)throw new Error('401');if(!r.ok)throw new Error(j.error||r.status);return j})})}
 function say(s,bad){var m=document.getElementById('msg');m.textContent=s;m.className=(bad?'bad':'muted')+' small'}
 function act(body){return api('POST',body).then(function(){say(T.saved);return load()}).catch(function(e){say(e.message,true)})}
-function load(){return api('GET').then(function(d){D=d;draw()}).catch(function(e){if(e.message==='401'){sessionStorage.removeItem(KEY);show(false,T.wrongToken)}else say(e.message,true)})}
+function load(){return api('GET').then(function(d){D=d;draw()}).catch(function(e){if(e.message==='401'){var had=!!token;sessionStorage.removeItem(KEY);token='';show(false,had?T.wrongToken:'')}else say(e.message,true)})}
 function show(ok,err){document.getElementById('login').hidden=ok;document.getElementById('app').hidden=!ok;document.getElementById('loginerr').textContent=err||''}
 function draw(){show(true);var n=D.pairs.length;
  document.getElementById('pairs').innerHTML=D.pairs.map(function(p,i){return'<tr><td><b>'+esc(p.pair)+'</b></td><td>'+(p.official?fmtRate(p.official.buy,LANG)+' / '+fmtRate(p.official.sell,LANG):'—')+'</td><td>'+(p.market?fmtRate(p.market.rate,LANG):'—')+'</td>'+
@@ -185,6 +187,6 @@ document.getElementById('addpair').onclick=function(){act({kind:'pair',fresh:tru
 document.getElementById('read').onclick=function(){var b=this;b.disabled=true;say('…');api('POST',{kind:'read'}).then(function(r){say(r.ok?T.ok:T.failed,!r.ok);return load()}).catch(function(e){say(e.message,true)}).finally(function(){b.disabled=false})};
 document.getElementById('backfill').onclick=function(){var b=this,from=document.getElementById('bfrom').value;b.disabled=true;
  (function step(f){say('… '+f);api('POST',{kind:'backfill',from:f}).then(function(r){if(r.next)return step(r.next);say(T.ok);b.disabled=false;return load()}).catch(function(e){say(e.message,true);b.disabled=false})})(from)};
-if(token)load();else show(false);`;
+load();`;
   return shell(lang, `${o.title} · ${t.admin}`, body, script);
 }

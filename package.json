@@ -1,6 +1,6 @@
 {
   "name": "cambista",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Exchange rates you host yourself: the official one (Banco Central del Uruguay) and the market's, any pair, an API, a public page and a panel. Runs on Cloudflare Workers (D1) or any server with Node (SQLite).",
   "keywords": [
     "exchange-rates",
