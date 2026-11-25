@@ -104,7 +104,7 @@ The admin API is `GET`/`POST /v1/admin` with `Authorization: Bearer <ADMIN_TOKEN
 
 ```ts
 cambistaWorker({                      // or serve({ … }) on Node, or createCambista({ sql, … })
-  page: { title: "Cotizaciones", tagline: "…", footer: "<p>…</p>" },
+  page: { title: "Cotizaciones", tagline: "…", footer: "<p>…</p>", lang: "es" }, // lang: else the browser's
   seed: { currencies: ["USD", "UYU", "EUR"], pairs: ["USD/UYU", "EUR/UYU"] }, // a new database's first ones
   schedule: {
     timeZone: "America/Montevideo",

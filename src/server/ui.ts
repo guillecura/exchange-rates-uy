@@ -13,8 +13,8 @@ import { MARKET_CREDIT } from "../rates/market.ts";
  *            cookie, an access proxy) it opens straight away; else it asks for the
  *            token once and keeps it for the tab.
  *
- * Light and dark follow the system. English and Spanish follow the browser
- * (`?lang=` to pick one).
+ * Light and dark follow the system. English or Spanish: the link's `?lang=`, else
+ * the server's `lang`, else the browser's.
  */
 
 export interface PageOptions {
@@ -24,6 +24,8 @@ export interface PageOptions {
   tagline?: string;
   /** Extra HTML at the foot of the public page (a link home, a credit). */
   footer?: string;
+  /** The pages' language when the link doesn't say (`?lang=`); without it, the browser's. */
+  lang?: Lang;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -50,8 +52,9 @@ const TEXT = {
 } as const;
 export type Lang = keyof typeof TEXT;
 
-export function pickLang(req: Request): Lang {
-  const asked = new URL(req.url).searchParams.get("lang") ?? req.headers.get("accept-language") ?? "";
+/** The link's `?lang=`, else the server's own, else the browser's. */
+export function pickLang(req: Request, fallback?: Lang): Lang {
+  const asked = new URL(req.url).searchParams.get("lang") ?? fallback ?? req.headers.get("accept-language") ?? "";
   return asked.toLowerCase().startsWith("es") ? "es" : "en";
 }
 

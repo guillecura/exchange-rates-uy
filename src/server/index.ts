@@ -75,8 +75,8 @@ export function createCambista(o: CambistaOptions) {
     const api = await handleApi(req, o.sql, { schedule, authorize, maxAge: o.maxAge ?? 300 });
     if (api) return api;
     const html = (body: string) => new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
-    if (url.pathname === "/" && o.publicPage !== false) return html(publicPage(pickLang(req), page));
-    if (url.pathname === "/admin" && adminOn) return html(adminPage(pickLang(req), page));
+    if (url.pathname === "/" && o.publicPage !== false) return html(publicPage(pickLang(req, page.lang), page));
+    if (url.pathname === "/admin" && adminOn) return html(adminPage(pickLang(req, page.lang), page));
     return new Response("Not found", { status: 404 });
   }
 
