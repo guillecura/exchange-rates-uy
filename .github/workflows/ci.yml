@@ -3,7 +3,7 @@ on:
   push: { branches: [main] }
   pull_request:
 jobs:
-  test:
+  node:
     runs-on: ubuntu-latest
     strategy:
       matrix: { node: [22, 24] }
@@ -15,3 +15,15 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+  swift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test
+  kotlin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - run: cd clients/kotlin && ./gradlew test publishToMavenLocal --console=plain

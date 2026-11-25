@@ -5,3 +5,9 @@ dist
 *.db
 *.db-*
 coverage
+.build/
+.swiftpm/
+Package.resolved
+clients/kotlin/.gradle/
+clients/kotlin/build/
+clients/kotlin/.kotlin/

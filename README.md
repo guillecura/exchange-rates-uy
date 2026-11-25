@@ -242,13 +242,15 @@ What a browser says about where a call comes from stops other web pages from usi
 
 ## Connect an app
 
-To read a server (yours, or rates.whitebear.io with its key) from an app, there is a client for each platform, with the API's own names and types:
+One package, three clients, all in this repository with the same calls and names (`official`, `market`, `pairs`, `currencies`, `history`, `convert`), for any exchange-rates-uy server (yours, or rates.whitebear.io with its key):
 
-| Platform | Package |
+| Platform | Install from this repository |
 | --- | --- |
-| JavaScript and TypeScript (Deno, Node, Workers, Supabase Edge Functions, browsers) | `exchange-rates-uy/client` |
-| iOS, macOS (Swift) | [exchange-rates-uy-swift](https://github.com/guillecura/exchange-rates-uy-swift) |
-| Android, JVM (Kotlin) | [exchange-rates-uy-kotlin](https://github.com/guillecura/exchange-rates-uy-kotlin) |
+| JavaScript and TypeScript (Deno, Node, Workers, Supabase Edge Functions, browsers) | npm: `exchange-rates-uy/client` |
+| iOS, macOS (Swift, `async/await`) | Swift Package Manager: `https://github.com/guillecura/exchange-rates-uy` |
+| Android, JVM (Kotlin, coroutines) | JitPack: `com.github.guillecura:exchange-rates-uy:<tag>` |
+
+**JavaScript**
 
 ```ts
 import { createRatesClient } from "exchange-rates-uy/client";
@@ -260,7 +262,32 @@ const usd = await rates.history("USD/UYU", { from: "2026-01-01" });
 await rates.convert({ amount: 100, from: "USD", to: "UYU", source: "official" });
 ```
 
-In Deno without npm, take the client straight from a release: `https://raw.githubusercontent.com/guillecura/exchange-rates-uy/v1.3.0/src/client.ts`. A key belongs on a server: in a phone app it can be read out of the binary, so there it only says which app is asking.
+In Deno without npm: `https://raw.githubusercontent.com/guillecura/exchange-rates-uy/<tag>/src/client.ts` (it imports nothing).
+
+**Swift** (iOS 15, macOS 12; in Xcode, **File › Add Package Dependencies…** with this repository's URL)
+
+```swift
+import ExchangeRatesUY
+
+let rates = RatesClient(baseURL: URL(string: "https://your-server/api")!, key: "…")
+let bank = try await rates.official()                      // bank.perLocal["USD"]: Spread(buy:sell:)
+let market = try await rates.market()                      // market.perLocal()["EUR"]: pesos per euro
+let usd = try await rates.history("USD/UYU", from: "2026-01-01")
+```
+
+**Kotlin** (Android needs `android.permission.INTERNET`)
+
+```kotlin
+// settings.gradle.kts: repositories { maven("https://jitpack.io") }
+// build.gradle.kts:    implementation("com.github.guillecura:exchange-rates-uy:v1.4.0")
+import uy.exchangerates.RatesClient
+
+val rates = RatesClient("https://your-server/api", key = "…")
+val bank = rates.official()                                // suspends, on Dispatchers.IO
+val usd = rates.history("USD/UYU", from = "2026-01-01")
+```
+
+A refused call fails with the status and the server's own words (`RatesError`, `RatesError`, `RatesException`). A key belongs on a server: in a phone app it can be read out of the binary, so there it only says which app is asking; give each app its own.
 
 ## The library
 
@@ -300,9 +327,11 @@ Retiring a currency or a pair only hides it: the readings stay, and bringing it 
 
 ```sh
 npm install
-npm test          # every server test on SQLite and on Postgres (PGlite)
+npm test                              # the server on SQLite and on Postgres (PGlite), and the JS client
 npm run typecheck
 npm run build
+swift test                            # the Swift client
+cd clients/kotlin && ./gradlew test   # the Kotlin client (JDK 17)
 ```
 
 ## Credits

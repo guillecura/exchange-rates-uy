@@ -1,0 +1,5 @@
+# JitPack builds the Kotlin client (clients/kotlin) from this repository's tags: com.github.guillecura:exchange-rates-uy:<tag>
+jdk:
+  - openjdk17
+install:
+  - cd clients/kotlin && ./gradlew publishToMavenLocal -Pversion=$VERSION --console=plain
