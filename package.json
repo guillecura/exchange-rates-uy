@@ -2,30 +2,67 @@
   "name": "cambista",
   "version": "0.1.0",
   "description": "Exchange rates you host yourself: the official one (Banco Central del Uruguay) and the market's, any pair, an API, a public page and a panel. Runs on Cloudflare Workers (D1) or any server with Node (SQLite).",
-  "keywords": ["exchange-rates", "currency", "fx", "bcu", "uruguay", "cloudflare-workers", "d1", "sqlite", "self-hosted"],
+  "keywords": [
+    "exchange-rates",
+    "currency",
+    "fx",
+    "bcu",
+    "uruguay",
+    "cloudflare-workers",
+    "d1",
+    "sqlite",
+    "self-hosted"
+  ],
   "license": "MIT",
   "author": "Guille Cura",
   "homepage": "https://github.com/guillecura/cambista#readme",
-  "repository": { "type": "git", "url": "git+https://github.com/guillecura/cambista.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guillecura/cambista.git"
+  },
   "bugs": "https://github.com/guillecura/cambista/issues",
   "type": "module",
   "sideEffects": false,
-  "engines": { "node": ">=22.13" },
-  "bin": { "cambista": "dist/cli.js" },
-  "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./money": { "types": "./dist/money.d.ts", "default": "./dist/money.js" },
-    "./server": { "types": "./dist/server.d.ts", "default": "./dist/server.js" },
-    "./worker": { "types": "./dist/worker.d.ts", "default": "./dist/worker.js" },
-    "./node": { "types": "./dist/node.d.ts", "default": "./dist/node.js" }
+  "engines": {
+    "node": ">=22.13"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "bin": {
+    "cambista": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./money": {
+      "types": "./dist/money.d.ts",
+      "default": "./dist/money.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "default": "./dist/worker.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
     "start": "node --disable-warning=ExperimentalWarning src/cli.ts serve",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "prepare": "npm run build"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
