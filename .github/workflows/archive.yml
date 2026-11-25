@@ -1,0 +1,35 @@
+# The market's archive, once a month: the days added up to yesterday (data/market), and the package published with
+# them. npm takes it from this workflow alone (trusted publishing: no token kept anywhere).
+name: Archive
+on:
+  schedule: [{ cron: "0 9 1 * *" }]   # the 1st, 06:00 in Montevideo
+  workflow_dispatch:
+permissions:
+  contents: write
+  id-token: write
+concurrency: { group: archive }
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, registry-url: "https://registry.npmjs.org", cache: npm }
+      - run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm run archive
+      - id: grew
+        run: echo "files=$(git status --porcelain data | wc -l)" >> "$GITHUB_OUTPUT"
+      - if: steps.grew.outputs.files != '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npm version patch --no-git-tag-version
+          V=$(node -p 'require("./package.json").version')
+          sed -i -E "s/(exchange-rates-uy\", from: \")[0-9.]+/\1$V/" Package.swift
+          sed -i -E "s/(exchange-rates-uy:v)[0-9.]+/\1$V/" README.md
+          git add data package.json package-lock.json Package.swift README.md
+          git commit -m "the market's archive through $(ls data/market | tail -1 | cut -c1-7): $V"
+          git tag "v$V"
+          git push origin HEAD "v$V"
+          npm publish --provenance --access public

@@ -54,7 +54,7 @@ test("without a server the client reads the sources itself, with the server's ar
     ]);
     const past = await rates.market("2026-11-21");
     assert.equal(past.source, "past");
-    assert.equal(past.credit.label, "Rates by fawazahmed0/exchange-api");
+    assert.equal(past.credit.label, "exchange-rates-uy");
     await assert.rejects(rates.market("2020-01-01"), (e) => e instanceof RatesError && e.status === 404);
     assert.deepEqual((await rates.currencies("es")).map((c) => c.iso), ["USD", "UYU", "EUR"]);
   } finally {

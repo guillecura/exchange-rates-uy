@@ -66,9 +66,10 @@ class RatesClientTest {
         server.removeContext("/")
         server.createContext("/") { ex ->
             val path = ex.requestURI.path
-            val body = if (path.startsWith("/past/")) {
-                val day = path.removePrefix("/past/")
-                """{"date":"$day","usd":{"usd":1,"uyu":40,"eur":0.9,"btc":0.00001,"1inch":2.6}}"""
+            val body = if (path.startsWith("/archive/")) {
+                val month = path.removePrefix("/archive/")
+                val days = (1..28).joinToString(",") { "\"$month-%02d\":{\"UYU\":40,\"EUR\":0.9}".format(it) }
+                """{"base":"USD","month":"$month","days":{$days}}"""
             } else if (path.startsWith("/bcu")) {
                 "<Envelope><status>1</status>" +
                     "<datoscotizaciones.dato><Fecha>2026-11-24</Fecha><Moneda>2225</Moneda><TCC>39.5</TCC><TCV>41.9</TCV></datoscotizaciones.dato>" +
@@ -84,7 +85,7 @@ class RatesClientTest {
 
     private fun direct(): RatesClient {
         val root = "http://127.0.0.1:${server.address.port}"
-        return RatesClient.direct(Direct(listOf("USD/UYU", "EUR/USD"), emptyList(), 15_000, "$root/bcu", "$root/market", { listOf("$root/past/$it") }))
+        return RatesClient.direct(Direct(listOf("USD/UYU", "EUR/USD"), emptyList(), 15_000, "$root/bcu", "$root/market", { listOf("$root/archive/$it") }))
     }
 
     @Test fun directOfficialAndPairs() = runBlocking {
@@ -110,8 +111,8 @@ class RatesClientTest {
         assertEquals(listOf(Triple("2026-11-21", 40.0, "past"), Triple("2026-11-22", 40.0, "past"), Triple("2026-11-23", 40.5, "live")), market.map { Triple(it.day, it.buy, it.source) })
         val past = rates.market("2026-11-22")
         assertEquals("past", past.source)
-        assertEquals(null, past.perUsd["BTC"], "only ISO currencies")
-        assertEquals("Rates by fawazahmed0/exchange-api", past.credit.label)
+        assertEquals(1.0, past.perUsd["USD"])
+        assertEquals("exchange-rates-uy", past.credit.label)
         assertEquals(404, assertFailsWith<RatesException> { rates.market("2020-01-01") }.status)
         assertEquals(listOf("USD", "UYU", "EUR"), rates.currencies("es").map { it.iso })
     }

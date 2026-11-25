@@ -88,7 +88,7 @@ export async function readMarket(sql: Sql): Promise<{ day: string; rows: number 
 
 /**
  * The market's table for `day`. ExchangeRate-API only gives today's, so the days before the server
- * started reading it, and a day a reading missed, are filled in from the past dataset
+ * started reading it, and a day a reading missed, are filled in from the package's archive
  * (`pastMarketTable`) the first time they are asked for, and kept. A day after the newest table
  * answers the newest (the market's table of today is built in the evening).
  */
@@ -109,7 +109,7 @@ const PAST_CURSOR = "market_past_before";
  * The market's past, a few days per tick, newest first, back to `PAST_MARKET_FROM`, so a pair's
  * market history reaches back that far. Few per tick because each day is a table of every
  * currency (a hundred and sixty rows), and a free database counts the rows written per day.
- * Where it got to is kept in `{meta}`; a day the dataset lacks is skipped (asked for later,
+ * Where it got to is kept in `{meta}`; a day the archive lacks is skipped (asked for later,
  * `marketFor` tries it again).
  */
 export async function fillPastMarket(sql: Sql, perTick: number): Promise<string[]> {
@@ -127,7 +127,7 @@ export async function fillPastMarket(sql: Sql, perTick: number): Promise<string[
       break;
     }
     const t = await pastMarketTable(day).catch(() => null);
-    if (t) {
+    if (t?.day === day) {
       await keepMarket(sql, t);
       filled.push(day);
     } else missing.push(day);

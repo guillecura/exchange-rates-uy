@@ -77,9 +77,10 @@ final class RatesClientTests: XCTestCase {
     func sources() {
         Stub.answer = { req in
             if req.url?.host == "cotizaciones.bcu.gub.uy" { return (200, RatesClientTests.bcu) }
-            if let url = req.url?.absoluteString, let r = url.range(of: #"currency-api@(\d{4}-\d{2}-\d{2})"#, options: .regularExpression) {
-                let day = String(url[r].dropFirst("currency-api@".count))
-                return day >= "2024-03-02" ? (200, #"{"date":"\#(day)","usd":{"usd":1,"uyu":40,"eur":0.9,"btc":0.00001,"1inch":2.6}}"#) : (404, "{}")
+            if let url = req.url?.absoluteString, let r = url.range(of: #"/data/market/\d{4}-\d{2}\.json$"#, options: .regularExpression) {
+                let month = String(url[r].dropFirst("/data/market/".count).prefix(7))
+                let days = (1...28).map { #""\#(month)-\#(String(format: "%02d", $0))":{"UYU":40,"EUR":0.9}"# }.joined(separator: ",")
+                return month >= "2024-03" ? (200, #"{"base":"USD","month":"\#(month)","days":{\#(days)}}"#) : (404, "{}")
             }
             return (200, #"{"result":"success","time_last_update_unix":1795478551,"rates":{"USD":1,"UYU":40.5,"EUR":0.86,"JPY":155}}"#)
         }
@@ -113,8 +114,8 @@ final class RatesClientTests: XCTestCase {
         XCTAssertEqual(marketDays.map(\.source), ["past", "past", "live"])
         let past = try await rates.market(date: "2026-11-22")
         XCTAssertEqual(past.source, "past")
-        XCTAssertNil(past.perUsd["BTC"], "only ISO currencies")
-        XCTAssertEqual(past.credit.label, "Rates by fawazahmed0/exchange-api")
+        XCTAssertEqual(past.perUsd["USD"], 1)
+        XCTAssertEqual(past.credit.label, "exchange-rates-uy")
         do {
             _ = try await rates.market(date: "2020-01-01")
             XCTFail("before the dataset begins")

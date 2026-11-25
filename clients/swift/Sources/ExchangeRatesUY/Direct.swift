@@ -2,12 +2,13 @@ import Foundation
 
 /// The client without a server: the same calls, answered by reading the sources directly, with the same arithmetic as
 /// the server and the JavaScript client (src/rates in the package): the BCU's SOAP service, one day or a range at a
-/// time, and ExchangeRate-API's table; the market's past days (from 2 March 2024) from fawazahmed0's exchange-api, a
-/// day per request.
+/// time, and ExchangeRate-API's table; the market's past days (from 2 March 2024) from the package's own archive
+/// (`data/market/YYYY-MM.json`), a month per request, kept.
 struct Direct: Sendable {
     let pairs: [(base: String, quote: String)]
     let isos: [String]
     let session: URLSession
+    let archive = Archive()
 
     init(pairs: [String], currencies: [String], session: URLSession) {
         self.pairs = pairs.compactMap { Direct.sides($0) }
@@ -31,16 +32,35 @@ struct Direct: Sendable {
     static let bcuPage = "https://www.bcu.gub.uy/Estadisticas-e-Indicadores/Paginas/Cotizaciones.aspx"
     static let marketURL = URL(string: "https://open.er-api.com/v6/latest/USD")!
     static let credit = Credit(label: "Rates By Exchange Rate API", href: "https://www.exchangerate-api.com")
-    /// The market's past: fawazahmed0's exchange-api (CC0), a table a day since this one.
+    /// The market's past: the package's archive, a table a day since this one.
     static let pastFrom = "2024-03-02"
-    static let pastCredit = Credit(label: "Rates by fawazahmed0/exchange-api", href: "https://github.com/fawazahmed0/exchange-api")
-    static func pastURLs(_ day: String) -> [URL] {
+    static let pastCredit = Credit(label: "exchange-rates-uy", href: "https://github.com/guillecura/exchange-rates-uy")
+    /// Where a month of the archive is read from, in order: the package as npm serves it, then the repository.
+    static func archiveURLs(_ month: String) -> [URL] {
         [
-            "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@\(day)/v1/currencies/usd.min.json",
-            "https://\(day).currency-api.pages.dev/v1/currencies/usd.min.json",
+            "https://cdn.jsdelivr.net/npm/exchange-rates-uy@1/data/market/\(month).json",
+            "https://raw.githubusercontent.com/guillecura/exchange-rates-uy/main/data/market/\(month).json",
         ].compactMap(URL.init(string:))
     }
-    static let isoCodes = Set(Locale.isoCurrencyCodes)
+
+    /// The months of the archive read, kept; a month is read again after six hours when a day asked for is not in it.
+    actor Archive {
+        private var months: [String: (at: Date, days: [String: [String: Double]])] = [:]
+
+        func day(_ day: String, session: URLSession) async -> [String: Double]? {
+            let month = String(day.prefix(7))
+            if let kept = months[month], kept.days[day] != nil || Date().timeIntervalSince(kept.at) < 6 * 3600 { return kept.days[day] }
+            struct File: Decodable { let month: String; let days: [String: [String: Double]] }
+            for url in Direct.archiveURLs(month) {
+                guard let got = try? await session.data(for: URLRequest(url: url, timeoutInterval: 15)),
+                      (got.1 as? HTTPURLResponse)?.statusCode == 200,
+                      let f = try? JSONDecoder().decode(File.self, from: got.0), f.month == month else { continue }
+                months[month] = (Date(), f.days)
+                return f.days[day]
+            }
+            return nil
+        }
+    }
 
     struct Reading {
         var day: String
@@ -111,22 +131,18 @@ struct Direct: Sendable {
         return (day, rates)
     }
 
-    /// A past day's table, ISO currencies only (the dataset carries crypto tokens too).
+    /// A past day's table from the archive: that day's, or the last one before it within a week (it lacks a few days).
     func pastTable(_ day: String) async throws -> (day: String, perUsd: [String: Double]) {
         guard day >= Direct.pastFrom else { throw RatesError(status: 404, message: "the market's past begins on \(Direct.pastFrom)") }
-        struct Answer: Decodable { let date: String?; let usd: [String: Double]? }
-        for url in Direct.pastURLs(day) {
-            guard let got = try? await session.data(for: URLRequest(url: url, timeoutInterval: 15)),
-                  (got.1 as? HTTPURLResponse)?.statusCode == 200,
-                  let a = try? JSONDecoder().decode(Answer.self, from: got.0), a.date == day, let usd = a.usd else { continue }
-            var perUsd: [String: Double] = ["USD": 1]
-            for (code, v) in usd {
-                let iso = code.uppercased()
-                if iso.count == 3, Direct.isoCodes.contains(iso), v.isFinite, v > 0 { perUsd[iso] = v }
+        for back in 0..<7 {
+            let d = Direct.shift(day, -back)
+            if d < Direct.pastFrom { break }
+            if var perUsd = await archive.day(d, session: session), perUsd["UYU"] != nil {
+                perUsd["USD"] = 1
+                return (d, perUsd)
             }
-            if perUsd["UYU"] != nil { return (day, perUsd) }
         }
-        throw RatesError(status: 502, message: "no market table for \(day)")
+        throw RatesError(status: 404, message: "no market table for \(day)")
     }
 
     // MARK: The arithmetic (the package's officialCross and marketCross)
@@ -154,12 +170,16 @@ struct Direct: Sendable {
 
     func market(date: String?) async throws -> Market {
         let asked = try Direct.checked(date) ?? Direct.today()
-        let t = try await table()
-        // ExchangeRate-API only has today's table; a day before it comes from the past dataset.
-        if date != nil && asked != Direct.today() && asked < t.day {
+        return try await market(asked: asked, live: try? await table())
+    }
+
+    /// The market's table for `asked`: ExchangeRate-API's from its own day on, the archive's before it.
+    func market(asked: String, live: (day: String, perUsd: [String: Double])?) async throws -> Market {
+        if asked < Direct.today(), live.map({ asked < $0.day }) ?? true {
             let p = try await pastTable(asked)
             return Market(date: asked, day: p.day, perUsd: p.perUsd, base: "USD", credit: Direct.pastCredit, source: "past")
         }
+        guard let t = live else { throw RatesError(status: 502, message: "ExchangeRate-API answered no table") }
         return Market(date: asked, day: t.day, perUsd: t.perUsd, base: "USD", credit: Direct.credit, source: "live")
     }
 
@@ -197,21 +217,17 @@ struct Direct: Sendable {
         let end = try Direct.checked(to) ?? Direct.today()
         let start = try Direct.checked(from) ?? Direct.shift(end, -30)
         if source == .market {
-            // A table per day; a year at most, since each day is a request.
-            guard Direct.shift(start, 366) >= end else { throw RatesError(status: 400, message: "without a server, a year of the market at most at once") }
-            var days: [String] = []
-            var d = max(start, Direct.pastFrom)
-            while d <= end { days.append(d); d = Direct.shift(d, 1) }
-            let today = Direct.today()
-            let markets = await withTaskGroup(of: Market?.self) { group in
-                for day in days { group.addTask { try? await market(date: day == today ? nil : day) } }
-                var out: [Market] = []
-                for await m in group { if let m { out.append(m) } }
-                return out
-            }
+            // A month of the archive per request, kept; ten years at most, as a server answers.
+            guard Direct.shift(start, 3_660) >= end else { throw RatesError(status: 400, message: "ten years of the market at most at once") }
+            let live = try? await table()
             var byDay: [String: HistoryDay] = [:]
-            for m in markets {
-                if let rate = Direct.marketCross(m.perUsd, p.base, p.quote) { byDay[m.day] = HistoryDay(day: m.day, buy: rate, sell: rate, source: m.source) }
+            var d = max(start, Direct.pastFrom)
+            while d <= end {
+                if let m = try? await market(asked: d, live: live), byDay[m.day] == nil,
+                   let rate = Direct.marketCross(m.perUsd, p.base, p.quote) {
+                    byDay[m.day] = HistoryDay(day: m.day, buy: rate, sell: rate, source: m.source)
+                }
+                d = Direct.shift(d, 1)
             }
             return byDay.values.sorted { $0.day < $1.day }
         }

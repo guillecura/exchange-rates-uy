@@ -1,6 +1,6 @@
 {
   "name": "exchange-rates-uy",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "Uruguay's exchange rates, self-hosted: the official one (Banco Central del Uruguay) and the market's, any pair, customizable pairs and schedule, an API, a public page and a panel. Any backend: SQLite, Postgres (Supabase, Neon, Vercel, RDS), Cloudflare D1; Node, Workers, Lambda, Vercel, Deno, Bun.",
   "keywords": [
     "android",
@@ -82,6 +82,7 @@
   },
   "files": [
     "dist",
+    "data",
     "README.md",
     "LICENSE"
   ],
@@ -89,6 +90,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
+    "archive": "node scripts/archive.ts",
     "start": "node --disable-warning=ExperimentalWarning src/cli.ts serve",
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "prepare": "npm run build"

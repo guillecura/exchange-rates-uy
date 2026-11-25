@@ -10,8 +10,8 @@ import kotlinx.serialization.json.Json
 /**
  * The client without a server: the same calls, answered by reading the sources directly, with the same arithmetic as
  * the server and the JavaScript client (src/rates in the package): the BCU's SOAP service, one day or a range at a
- * time, and ExchangeRate-API's table; the market's past days (from 2 March 2024) from fawazahmed0's exchange-api, a
- * day per request. Blocking: [RatesClient] runs it on IO.
+ * time, and ExchangeRate-API's table; the market's past days (from 2 March 2024) from the package's own archive
+ * (`data/market/YYYY-MM.json`), a month per request, kept. Blocking: [RatesClient] runs it on IO.
  */
 internal class Direct(
     pairs: List<String>,
@@ -19,7 +19,7 @@ internal class Direct(
     private val timeoutMillis: Int,
     private val bcuUrl: String = BCU_URL,
     private val marketUrl: String = MARKET_URL,
-    private val pastUrls: (String) -> List<String> = ::pastUrlsOf,
+    private val archiveUrls: (String) -> List<String> = ::archiveUrlsOf,
 ) {
     private val pairs = pairs.mapNotNull { sides(it) }
     private val isos = (this.pairs.flatMap { listOf(it.first, it.second) } + currencies.map { it.uppercase() }).distinct()
@@ -40,14 +40,15 @@ internal class Direct(
         const val BCU_PAGE = "https://www.bcu.gub.uy/Estadisticas-e-Indicadores/Paginas/Cotizaciones.aspx"
         const val MARKET_URL = "https://open.er-api.com/v6/latest/USD"
         val CREDIT = Credit("Rates By Exchange Rate API", "https://www.exchangerate-api.com")
-        /** The market's past: fawazahmed0's exchange-api (CC0), a table a day since this one. */
+        /** The market's past: the package's archive, a table a day since this one. */
         const val PAST_FROM = "2024-03-02"
-        val PAST_CREDIT = Credit("Rates by fawazahmed0/exchange-api", "https://github.com/fawazahmed0/exchange-api")
-        fun pastUrlsOf(day: String) = listOf(
-            "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@$day/v1/currencies/usd.min.json",
-            "https://$day.currency-api.pages.dev/v1/currencies/usd.min.json",
+        val PAST_CREDIT = Credit("exchange-rates-uy", "https://github.com/guillecura/exchange-rates-uy")
+        /** Where a month of the archive is read from, in order: the package as npm serves it, then the repository. */
+        fun archiveUrlsOf(month: String) = listOf(
+            "https://cdn.jsdelivr.net/npm/exchange-rates-uy@1/data/market/$month.json",
+            "https://raw.githubusercontent.com/guillecura/exchange-rates-uy/main/data/market/$month.json",
         )
-        private val ISO_CODES: Set<String> by lazy { java.util.Currency.getAvailableCurrencies().map { it.currencyCode }.toSet() }
+        private const val STALE_MILLIS = 6 * 3_600_000L
         private val MONTEVIDEO: ZoneId = ZoneId.of("America/Montevideo")
         private val DAY = Regex("""^\d{4}-\d{2}-\d{2}$""")
 
@@ -135,23 +136,33 @@ internal class Direct(
     }
 
     @Serializable
-    private data class PastTable(val date: String? = null, val usd: Map<String, Double>? = null)
+    private data class ArchiveMonth(val month: String? = null, val days: Map<String, Map<String, Double>> = emptyMap())
 
-    /** A past day's table, ISO currencies only (the dataset carries crypto tokens too). */
+    /** The months of the archive read, kept; a month is read again after six hours when a day asked for is not in it. */
+    private val months = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, Map<String, Map<String, Double>>>>()
+
+    private fun archived(day: String): Map<String, Double>? {
+        val month = day.take(7)
+        months[month]?.let { (at, days) -> if (day in days || System.currentTimeMillis() - at < STALE_MILLIS) return days[day] }
+        for (url in archiveUrls(month)) {
+            val (status, body) = runCatching { http(url, timeoutMillis) }.getOrNull() ?: continue
+            val m = runCatching { json.decodeFromString<ArchiveMonth>(body) }.getOrNull()
+            if (status != 200 || m?.month != month) continue
+            months[month] = System.currentTimeMillis() to m.days
+            return m.days[day]
+        }
+        return null
+    }
+
+    /** A past day's table from the archive: that day's, or the last one before it within a week (it lacks a few days). */
     fun pastTable(day: String): Pair<String, Map<String, Double>> {
         if (day < PAST_FROM) throw RatesException(404, "the market's past begins on $PAST_FROM")
-        for (url in pastUrls(day)) {
-            val (status, body) = runCatching { http(url, timeoutMillis) }.getOrNull() ?: continue
-            val t = runCatching { json.decodeFromString<PastTable>(body) }.getOrNull()
-            if (status != 200 || t?.date != day || t.usd == null) continue
-            val perUsd = mutableMapOf("USD" to 1.0)
-            for ((k, v) in t.usd) {
-                val iso = k.uppercase()
-                if (iso.length == 3 && iso in ISO_CODES && v.isFinite() && v > 0) perUsd[iso] = v
-            }
-            if ("UYU" in perUsd) return day to perUsd
+        for (back in 0L until 7L) {
+            val d = shift(day, -back)
+            if (d < PAST_FROM) break
+            archived(d)?.takeIf { "UYU" in it }?.let { return d to (it + ("USD" to 1.0)) }
         }
-        throw RatesException(502, "no market table for $day")
+        throw RatesException(404, "no market table for $day")
     }
 
     // The calls
@@ -164,11 +175,16 @@ internal class Direct(
 
     fun market(date: String?): Market {
         val asked = checked(date) ?: today()
-        val (day, perUsd) = table()
-        if (date != null && asked != today() && asked < day) {
+        return market(asked, runCatching { table() }.getOrNull())
+    }
+
+    /** The market's table for [asked]: ExchangeRate-API's from its own day on, the archive's before it. */
+    private fun market(asked: String, live: Pair<String, Map<String, Double>>?): Market {
+        if (asked < today() && (live == null || asked < live.first)) {
             val (past, pastPerUsd) = pastTable(asked)
             return Market(asked, past, pastPerUsd, "USD", PAST_CREDIT, "past")
         }
+        val (day, perUsd) = live ?: throw RatesException(502, "ExchangeRate-API answered no table")
         return Market(asked, day, perUsd, "USD", CREDIT, "live")
     }
 
@@ -205,13 +221,14 @@ internal class Direct(
         val end = checked(to) ?: today()
         val start = checked(from) ?: shift(end, -30)
         if (source == Source.MARKET) {
-            // A table per day; a year at most, since each day is a request.
-            if (LocalDate.parse(start).plusDays(366) < LocalDate.parse(end)) throw RatesException(400, "without a server, a year of the market at most at once")
+            // A month of the archive per request, kept; ten years at most, as a server answers.
+            if (LocalDate.parse(start).plusDays(3_660) < LocalDate.parse(end)) throw RatesException(400, "ten years of the market at most at once")
+            val live = runCatching { table() }.getOrNull()
             val out = sortedMapOf<String, HistoryDay>()
             var d = maxOf(start, PAST_FROM)
             while (d <= end) {
-                runCatching { market(if (d == today()) null else d) }.getOrNull()?.let { m ->
-                    marketCross(m.perUsd, base, quote)?.let { out[m.day] = HistoryDay(m.day, it, it, m.source) }
+                runCatching { market(d, live) }.getOrNull()?.let { m ->
+                    if (m.day !in out) marketCross(m.perUsd, base, quote)?.let { out[m.day] = HistoryDay(m.day, it, it, m.source) }
                 }
                 d = shift(d, 1)
             }

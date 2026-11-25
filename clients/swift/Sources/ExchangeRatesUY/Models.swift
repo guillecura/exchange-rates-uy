@@ -29,7 +29,7 @@ public struct Market: Codable, Equatable, Sendable {
     public let perUsd: [String: Double]
     public let base: String
     public let credit: Credit
-    /// Whose table: ExchangeRate-API's on its day (`live`), or a past day from fawazahmed0's exchange-api (`past`).
+    /// Whose table: ExchangeRate-API's on its day (`live`), or a past day from the package's archive (`past`).
     public var source: String? = nil
 
     /// Pesos (or any `local`) per unit of each currency: the local column over the currency's.

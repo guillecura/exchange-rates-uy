@@ -4,7 +4,7 @@
  *   With a server (`baseUrl`): it asks an exchange-rates-uy server, which keeps the history and the pairs (yours, or
  *   rates.whitebear.io with its key).
  *   Without one: it reads the sources itself, the BCU and the market, with the same arithmetic the server uses
- *   (`direct.ts`). The market's past days need a server (the source only gives today's), and in a browser the BCU
+ *   (`direct.ts`), and the market's past days from the package's archive (`data/market`), and in a browser the BCU
  *   refuses other pages (no CORS), so there the direct way works on a server (Node, Deno, Workers) only.
  *
  *   import { createRatesClient } from "exchange-rates-uy/client";
@@ -38,7 +38,7 @@ export interface Market {
   day: string;
   perUsd: Record<string, number>;
   base: "USD";
-  /** Whose table: ExchangeRate-API's, read on its day (`live`), or a day gone by from fawazahmed0's exchange-api (`past`). */
+  /** Whose table: ExchangeRate-API's, read on its day (`live`), or a day gone by from the package's archive (`past`). */
   source?: "live" | "past";
   /** Who to credit beside its figures (the `source`'s). */
   credit: { label: string; href: string };

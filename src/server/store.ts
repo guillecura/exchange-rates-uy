@@ -41,7 +41,7 @@ export interface OfficialDay {
 export interface MarketDay {
   day: string;
   perUsd: Record<string, number>;
-  /** Whose table: ExchangeRate-API's on its day, or a past day filled in (`pastMarketTable`). */
+  /** Whose table: ExchangeRate-API's on its day, or a past day from the package's archive (`pastMarketTable`). */
   source: MarketSource;
 }
 

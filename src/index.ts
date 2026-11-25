@@ -35,6 +35,6 @@ export {
   type BcuReading,
 } from "./rates/bcu.ts";
 export {
-  MARKET_CREDIT, PAST_MARKET_CREDIT, PAST_MARKET_FROM, fetchMarket, marketCredit, marketPairs, marketTable, pastMarketTable,
-  type MarketSource, type MarketTable,
+  MARKET_CREDIT, PAST_MARKET_CREDIT, PAST_MARKET_FROM, archiveUrls, fetchMarket, forgetArchive, marketCredit, marketPairs, marketTable, pastMarketTable,
+  type MarketMonth, type MarketSource, type MarketTable,
 } from "./rates/market.ts";

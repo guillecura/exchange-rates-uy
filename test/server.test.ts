@@ -215,7 +215,7 @@ test("access: only the allowed origins, the server's own page and the keys read 
   sql.close();
 });
 
-both("the market's past: a day asked for is filled in from the past dataset, and the ticks fill the rest, newest first", async (setup) => {
+both("the market's past: a day asked for is filled in from the archive, and the ticks fill the rest, newest first", async (setup) => {
   const { app, get } = await setup();
   const asked: string[] = [];
   const restore = fakeFetch(
@@ -237,9 +237,8 @@ both("the market's past: a day asked for is filled in from the past dataset, and
     assert.equal(past.status, 200);
     assert.equal(past.body.day, "2025-06-15");
     assert.equal(past.body.source, "past");
-    assert.equal(past.body.credit.href, "https://github.com/fawazahmed0/exchange-api");
+    assert.equal(past.body.credit.href, "https://github.com/guillecura/exchange-rates-uy");
     assert.equal(past.body.perUsd.UYU, 40.15);
-    assert.equal(past.body.perUsd.BTC, undefined, "only ISO currencies");
     assert.equal((await get("/api/convert?amount=10&from=USD&to=UYU&date=2025-06-15")).body.result, 401.5);
     assert.equal((await get("/api/market?date=2024-01-10")).status, 404, "before the dataset begins");
     const after = asked.length;
@@ -258,7 +257,7 @@ both("the market's past: a day asked for is filled in from the past dataset, and
       ["2026-11-17", "past"], ["2026-11-18", "past"], ["2026-11-20", "past"], ["2026-11-21", "past"],
       ["2026-11-22", "past"], ["2026-11-23", "live"],
     ]);
-    assert.equal(h.body.credits.past.label, "Rates by fawazahmed0/exchange-api");
+    assert.equal(h.body.credits.past.label, "exchange-rates-uy");
   } finally {
     restore();
   }

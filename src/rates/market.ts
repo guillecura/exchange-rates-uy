@@ -71,53 +71,89 @@ export async function marketTable(): Promise<MarketTable | null> {
 }
 
 /**
- * The market's past days, from fawazahmed0's exchange-api.
+ * The market's past days, from the archive this package keeps.
  *
- * ExchangeRate-API's free table is only today's, so a day gone by comes from here:
- * an open dataset (CC0) that has published every currency against the dollar once a
- * day since 2 March 2024, from several open sources, and is served from two CDNs.
- * Its figures sit within about one percent of ExchangeRate-API's, so a past day is
- * the market's that day and not the bank's, and its credit says whose it is
- * (`PAST_MARKET_CREDIT`). Only the currencies with an ISO 4217 code are kept: the
- * dataset also carries crypto tokens, which no table here has.
+ * ExchangeRate-API's free table is only today's, so a day gone by comes from
+ * `data/market/YYYY-MM.json`: every currency against the dollar, once a day since
+ * 2 March 2024, public-domain reference rates (within about one percent of
+ * ExchangeRate-API's) kept in the repository and published with the package every
+ * month (`scripts/archive.ts`). It is read from the package as npm serves it
+ * (jsDelivr), or from the repository when that has none yet: a month a request,
+ * kept in memory.
  */
 export const PAST_MARKET_FROM = "2024-03-02";
 
+/** The credit a past day goes with: this package's archive. */
 export const PAST_MARKET_CREDIT = {
-  label: "Rates by fawazahmed0/exchange-api",
-  href: "https://github.com/fawazahmed0/exchange-api",
+  label: "exchange-rates-uy",
+  href: "https://github.com/guillecura/exchange-rates-uy",
 } as const;
 
 /** The credit a table's figures go with. */
 export const marketCredit = (source: MarketSource | undefined) => (source === "past" ? PAST_MARKET_CREDIT : MARKET_CREDIT);
 
-const pastUrls = (day: string) => [
-  `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${day}/v1/currencies/usd.min.json`,
-  `https://${day}.currency-api.pages.dev/v1/currencies/usd.min.json`,
+/** One month of the archive: each day's table, how many of each currency buy one dollar. */
+export interface MarketMonth {
+  base: "USD";
+  month: string;
+  days: Record<string, Record<string, number>>;
+}
+
+/** Where a month of the archive is read from, in order. */
+export const archiveUrls = (month: string) => [
+  `https://cdn.jsdelivr.net/npm/exchange-rates-uy@1/data/market/${month}.json`,
+  `https://raw.githubusercontent.com/guillecura/exchange-rates-uy/main/data/market/${month}.json`,
 ];
 
-/** The market's table of a past `day` (`YYYY-MM-DD`, from `PAST_MARKET_FROM`), or null when neither CDN has it. */
-export async function pastMarketTable(day: string, fetcher: typeof fetch = fetch): Promise<MarketTable | null> {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day < PAST_MARKET_FROM) return null;
-  for (const url of pastUrls(day)) {
+const months = new Map<string, { at: number; file: Promise<MarketMonth | null> }>();
+/** A month read again after this long when a day asked for is not in it yet (the newest month grows). */
+const STALE = 6 * 3_600_000;
+
+async function readMonth(month: string, fetcher: typeof fetch): Promise<MarketMonth | null> {
+  for (const url of archiveUrls(month)) {
     const answer = await fetcher(url, { signal: AbortSignal.timeout(PATIENCE) }).catch(() => null);
     if (!answer?.ok) continue;
-    const body = (await answer.json().catch(() => null)) as { date?: string; usd?: Record<string, number> } | null;
-    if (!body?.usd || body.date !== day) continue;
-    const perUsd: Record<string, number> = { USD: 1 };
-    for (const [code, v] of Object.entries(body.usd)) {
-      const iso = code.toUpperCase();
-      if (/^[A-Z]{3}$/.test(iso) && ISO_CODES.has(iso) && Number.isFinite(v) && v > 0) perUsd[iso] = v;
-    }
-    if (!perUsd.UYU) continue;
-    return { day, perUsd, fetchedAt: Date.now(), source: "past" };
+    const body = (await answer.json().catch(() => null)) as MarketMonth | null;
+    if (body?.month === month && body.days && typeof body.days === "object") return body;
   }
   return null;
 }
 
-const ISO_CODES: ReadonlySet<string> = new Set(
-  typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("currency") : [],
-);
+/**
+ * The market's table of a past `day` (`YYYY-MM-DD`, from `PAST_MARKET_FROM`): that day's, or the last one before it
+ * within a week (the archive lacks a few days), saying which (`day`); null when there is none.
+ */
+export async function pastMarketTable(day: string, fetcher: typeof fetch = fetch): Promise<MarketTable | null> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day < PAST_MARKET_FROM) return null;
+  for (let back = 0; back < 7; back += 1) {
+    const d = new Date(Date.parse(`${day}T12:00:00Z`) - back * 86_400_000).toISOString().slice(0, 10);
+    if (d < PAST_MARKET_FROM) break;
+    const t = await archivedDay(d, fetcher);
+    if (t) return t;
+  }
+  return null;
+}
+
+async function archivedDay(day: string, fetcher: typeof fetch): Promise<MarketTable | null> {
+  const month = day.slice(0, 7);
+  let kept = months.get(month);
+  if (kept) {
+    const file = await kept.file;
+    if (!file || (!file.days[day] && Date.now() - kept.at > STALE)) kept = undefined;
+  }
+  if (!kept) {
+    kept = { at: Date.now(), file: readMonth(month, fetcher) };
+    months.set(month, kept);
+  }
+  const file = await kept.file;
+  if (!file) months.delete(month);
+  const perUsd = file?.days[day];
+  if (!perUsd?.UYU) return null;
+  return { day, perUsd: { ...perUsd, USD: 1 }, fetchedAt: Date.now(), source: "past" };
+}
+
+/** Forgets the months read (a test's). */
+export const forgetArchive = () => months.clear();
 
 /**
  * The table turned into the pairs asked for, among the currencies allowed.

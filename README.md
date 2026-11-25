@@ -1,6 +1,6 @@
 # exchange-rates-uy
 
-**Uruguay's exchange rates, on your own backend.** The **official** rate (Banco Central del Uruguay: buying and selling, every working day) and the **market** rate (ExchangeRate-API: every currency, every day; its past back to March 2024 from fawazahmed0's exchange-api), any pair between the currencies you choose, read on the schedule you choose, served by an API, a public page with a converter, and a panel to add currencies and pairs.
+**Uruguay's exchange rates, on your own backend.** The **official** rate (Banco Central del Uruguay: buying and selling, every working day) and the **market** rate (ExchangeRate-API: every currency, every day; its past back to March 2024 from the archive this package ships), any pair between the currencies you choose, read on the schedule you choose, served by an API, a public page with a converter, and a panel to add currencies and pairs.
 
 **Demo: [rates.whitebear.io](https://rates.whitebear.io)**, Whitebear's rates tool, running on this package.
 
@@ -246,7 +246,7 @@ What a browser says about where a call comes from stops other web pages from usi
 One package, three clients, all in this repository, with the same calls and names (`official`, `market`, `pairs`, `currencies`, `history`, `convert`) and **two ways to answer them**:
 
 - **With a server**: give the client its address. It asks your exchange-rates-uy server, which keeps the history, the pairs you chose and the market's past days. This is how Whitebear's apps read [rates.whitebear.io](https://rates.whitebear.io).
-- **Without one**: give it nothing, or the pairs you want. It reads the BCU and the market itself, with the same arithmetic the server uses, and a market's past day from the past dataset (below). Nothing to deploy. What it cannot do alone: the market's history beyond a year per call (a day is a request), and the BCU from a web page (the bank lets no other site call it; on a phone, a server or a script it is fine).
+- **Without one**: give it nothing, or the pairs you want. It reads the BCU and the market itself, with the same arithmetic the server uses, and a market's past day from the package's archive (below). Nothing to deploy. What it cannot do alone: the market's days after the archive's newest month (a server keeps them), and the BCU from a web page (the bank lets no other site call it; on a phone, a server or a script it is fine).
 
 | Platform | Install from this repository |
 | --- | --- |
@@ -287,7 +287,7 @@ let usd = try await rates.history("USD/UYU", from: "2026-01-01")
 
 ```kotlin
 // settings.gradle.kts: repositories { maven("https://jitpack.io") }
-// build.gradle.kts:    implementation("com.github.guillecura:exchange-rates-uy:v1.6.1")
+// build.gradle.kts:    implementation("com.github.guillecura:exchange-rates-uy:v1.7.0")
 import uy.exchangerates.RatesClient
 
 val rates = RatesClient("https://your-server/api", key = "…")           // with a server
@@ -346,17 +346,26 @@ cd clients/kotlin && ./gradlew test   # the Kotlin client (JDK 17)
 
 ## The market's past
 
-ExchangeRate-API's free table is only today's. A day before the server started reading it, or one a reading missed, comes from [fawazahmed0's exchange-api](https://github.com/fawazahmed0/exchange-api): an open dataset (CC0) with every currency against the dollar once a day since 2 March 2024, served by two CDNs, whose figures sit within about one percent of ExchangeRate-API's. Only the ISO 4217 currencies are kept.
+ExchangeRate-API's free table is only today's, so the package ships its own archive: [`data/market/YYYY-MM.json`](data/market), every ISO 4217 currency against the dollar once a day since 2 March 2024, public-domain reference rates (CC0) within about one percent of ExchangeRate-API's. It grows every month (`npm run archive`, run by [a workflow](.github/workflows/archive.yml) that publishes the package when a month was added), and it is free to use as it is:
+
+```js
+const nov = await fetch("https://cdn.jsdelivr.net/npm/exchange-rates-uy@1/data/market/2026-11.json").then((r) => r.json());
+nov.days["2026-11-20"].UYU;   // pesos per dollar that day
+```
+
+Every client and server reads a past day from there (jsDelivr, or the repository when a month is newer than the package), a month a request, kept in memory; nothing else is asked for the past. ExchangeRate-API's daily tables, which a server keeps, are not in the archive: its terms let you keep them, not publish them.
+
+A day before the server started reading the market, or one a reading missed, comes from the archive:
 
 - **A day asked for** (`/api/market?date=`, `convert`, `pairs`) is filled in at once and kept.
 - **The rest** is filled by the ticks, newest first, `pastMarketPerTick` days each (2 by default; 0 turns it off), so a pair's market history (`source=market`) reaches back to March 2024 within a week, with each day's `source`.
-- A day before 2024-03-02 has no market table: ask for the official rate there.
+- A day the archive lacks answers the last one before it (within a week), with its own `day`. A day before 2024-03-02 has no market table: ask for the official rate there.
 
 ## Credits
 
 - Official rates: [Banco Central del Uruguay](https://www.bcu.gub.uy/Estadisticas-e-Indicadores/Paginas/Cotizaciones.aspx).
 - Market rates: [Rates By Exchange Rate API](https://www.exchangerate-api.com). Their free tier asks for this credit beside their figures, and the public page shows it: keep it if you build your own.
-- The market's past days: [fawazahmed0/exchange-api](https://github.com/fawazahmed0/exchange-api) (CC0). No credit is required; the API gives one anyway (`credit` on a `past` day).
+- The market's past days: this package's archive, public domain (CC0); a `past` day's `credit` points here.
 
 Made by [Guille Cura](https://github.com/guillecura). It keeps the rates for [Whitebear](https://whitebear.io)'s products ([rates.whitebear.io](https://rates.whitebear.io)) and for [Umino](https://github.com/Umino-Trade).
 
