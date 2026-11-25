@@ -1,34 +1,34 @@
 /**
- * cambista on Cloudflare Workers, with D1:
+ * On Cloudflare Workers, with D1:
  *
  *   // src/index.ts
- *   import { cambistaWorker } from "cambista/worker";
- *   export default cambistaWorker();
+ *   import { exchangeRatesWorker } from "exchange-rates-uy/worker";
+ *   export default exchangeRatesWorker();
  *
  *   # wrangler.toml
- *   [[d1_databases]]   binding = "DB", database_name = "cambista", database_id = "…"
+ *   [[d1_databases]]   binding = "DB", database_name = "rates", database_id = "…"
  *   [triggers]         crons = ["*\/15 * * * *"]
- *   # secret ADMIN_TOKEN: npx wrangler secret put ADMIN_TOKEN
+ *   # npx wrangler secret put ADMIN_TOKEN   (the panel)
  *
- * The Cron Trigger only wakes it: what is read and when is the schedule's
- * (`tick`), so the trigger can be every 15 minutes whatever the slots are.
+ * The Cron Trigger only wakes it: what is read and when is the schedule's, so the
+ * trigger can be every 15 minutes whatever the hours are.
  */
 import { d1Sql, type D1Like } from "../stores/d1.ts";
-import { createCambista, type CambistaOptions } from "../server/index.ts";
+import { createExchangeRates, type ExchangeRatesOptions } from "../server/index.ts";
 
-export interface CambistaEnv {
+export interface ExchangeRatesEnv {
   DB: D1Like;
   ADMIN_TOKEN?: string;
 }
 
-type Options = Omit<CambistaOptions, "sql" | "adminToken">;
+type Options = Omit<ExchangeRatesOptions, "sql" | "adminToken">;
 
-export function cambistaWorker<E extends CambistaEnv>(options: Options | ((env: E) => Options) = {}) {
-  let made: { env: E; app: ReturnType<typeof createCambista> } | null = null;
+export function exchangeRatesWorker<E extends ExchangeRatesEnv>(options: Options | ((env: E) => Options) = {}) {
+  let made: { env: E; app: ReturnType<typeof createExchangeRates> } | null = null;
   const app = (env: E) => {
     if (made?.env !== env) {
       const o = typeof options === "function" ? options(env) : options;
-      made = { env, app: createCambista({ ...o, sql: d1Sql(env.DB), adminToken: env.ADMIN_TOKEN }) };
+      made = { env, app: createExchangeRates({ ...o, sql: d1Sql(env.DB), adminToken: env.ADMIN_TOKEN }) };
     }
     return made.app;
   };

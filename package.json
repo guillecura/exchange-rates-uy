@@ -1,33 +1,38 @@
 {
-  "name": "cambista",
-  "version": "0.1.3",
-  "description": "Exchange rates you host yourself: the official one (Banco Central del Uruguay) and the market's, any pair, an API, a public page and a panel. Runs on Cloudflare Workers (D1) or any server with Node (SQLite).",
+  "name": "exchange-rates-uy",
+  "version": "1.0.0",
+  "description": "Uruguay's exchange rates, self-hosted: the official one (Banco Central del Uruguay) and the market's, any pair, customizable pairs and schedule, an API, a public page and a panel. Any backend: SQLite, Postgres (Supabase, Neon, Vercel, RDS), Cloudflare D1; Node, Workers, Lambda, Vercel, Deno, Bun.",
   "keywords": [
     "exchange-rates",
     "currency",
     "fx",
     "bcu",
     "uruguay",
+    "cotizaciones",
+    "self-hosted",
+    "sqlite",
+    "postgres",
+    "supabase",
     "cloudflare-workers",
     "d1",
-    "sqlite",
-    "self-hosted"
+    "aws-lambda",
+    "vercel"
   ],
   "license": "MIT",
   "author": "Guille Cura",
-  "homepage": "https://github.com/guillecura/cambista#readme",
+  "homepage": "https://fx.whitebear.io",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/guillecura/cambista.git"
+    "url": "git+https://github.com/guillecura/exchange-rates-uy.git"
   },
-  "bugs": "https://github.com/guillecura/cambista/issues",
+  "bugs": "https://github.com/guillecura/exchange-rates-uy/issues",
   "type": "module",
   "sideEffects": false,
   "engines": {
     "node": ">=22.13"
   },
   "bin": {
-    "cambista": "dist/cli.js"
+    "exchange-rates-uy": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -42,6 +47,18 @@
       "types": "./dist/server.d.ts",
       "default": "./dist/server.js"
     },
+    "./sqlite": {
+      "types": "./dist/sqlite.d.ts",
+      "default": "./dist/sqlite.js"
+    },
+    "./d1": {
+      "types": "./dist/d1.d.ts",
+      "default": "./dist/d1.js"
+    },
+    "./postgres": {
+      "types": "./dist/postgres.d.ts",
+      "default": "./dist/postgres.js"
+    },
     "./worker": {
       "types": "./dist/worker.d.ts",
       "default": "./dist/worker.js"
@@ -49,6 +66,10 @@
     "./node": {
       "types": "./dist/node.d.ts",
       "default": "./dist/node.js"
+    },
+    "./lambda": {
+      "types": "./dist/lambda.d.ts",
+      "default": "./dist/lambda.js"
     }
   },
   "files": [
@@ -66,6 +87,7 @@
   },
   "devDependencies": {
     "@types/node": "24.10.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "@electric-sql/pglite": "0.3.14"
   }
 }

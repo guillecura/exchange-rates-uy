@@ -1,12 +1,13 @@
 /**
- * cambista: exchange rates, the official one and the market's, and the arithmetic
- * that turns what each publishes into any pair.
+ * exchange-rates-uy: exchange rates, the official one and the market's, and the
+ * arithmetic that turns what each publishes into any pair.
  *
  * This entry point is the library, with no server in it and nothing to keep: the
  * two sources, the pair arithmetic and the time helpers. Formatting a currency is
- * `cambista/money`; a server that keeps the readings, answers an API and has a
- * panel to add currencies and pairs is `cambista/server`, with `cambista/worker`
- * (Cloudflare Workers and D1) and `cambista/node` (any server, SQLite) to run it.
+ * `exchange-rates-uy/money`. A server that keeps the readings, answers an API and
+ * has a panel to add currencies and pairs is `exchange-rates-uy/server`, on any
+ * database (`/sqlite`, `/d1`, `/postgres`) and any platform (`/worker`, `/node`,
+ * `/lambda`, or its `fetch` anywhere else).
  *
  * ## Two sources because they answer two questions
  *

@@ -82,7 +82,7 @@ code{font-size:14px;word-break:break-word}.bad{color:var(--bad)}.good{color:var(
 .notice{margin:12px 0;padding:10px 14px;border-radius:12px;background:var(--card);border:1px solid var(--line)}
 `;
 
-/** A rate written with four digits that mean something (`ratePlaces` in `cambista/money`), for the browser. */
+/** A rate written with four digits that mean something (`ratePlaces` in `exchange-rates-uy/money`), for the browser. */
 const RATE_JS = `
 function places(v){var s=Math.abs(v);if(!isFinite(s)||s===0)return 2;if(s>=1){var w=Math.floor(Math.log10(s))+1;var p=Math.max(4-w,0);return w>=4?p:Math.max(p,2)}return Math.min(-Math.floor(Math.log10(s))+2,8)}
 function fmtRate(v,lang){var p=places(v);return new Intl.NumberFormat(lang,{minimumFractionDigits:p,maximumFractionDigits:p}).format(v)}
@@ -95,7 +95,7 @@ function shell(lang: Lang, title: string, body: string, script: string): string 
 <title>${esc(title)}</title><style>${STYLE}</style></head><body><main>${body}</main><script>${RATE_JS}${script}</script></body></html>`;
 }
 
-export function publicPage(lang: Lang, o: PageOptions): string {
+export function publicPage(lang: Lang, o: PageOptions, base: string): string {
   const t = TEXT[lang];
   const body = `
 <h1>${esc(o.title)}</h1>${o.tagline ? `<p class="muted">${esc(o.tagline)}</p>` : ""}
@@ -114,28 +114,28 @@ export function publicPage(lang: Lang, o: PageOptions): string {
 <p class="muted small" style="margin-top:16px"><a href="${BCU_PAGE}">${t.sourceOfficial}</a> · <a href="${MARKET_CREDIT.href}">${MARKET_CREDIT.label}</a></p>
 <h2>${t.api}</h2>
 <dl>
-<dt><code><a href="/v1/pairs">/v1/pairs</a></code></dt><dd>${lang === "es" ? "Los pares con la cotización oficial (compra y venta) y la de mercado. <code>?date=AAAA-MM-DD</code> para otro día." : "The pairs with the official rate (buy and sell) and the market's. <code>?date=YYYY-MM-DD</code> for another day."}</dd>
-<dt><code><a href="/v1/pairs/USD-UYU/history">/v1/pairs/USD-UYU/history</a></code></dt><dd>${lang === "es" ? "Un par día por día; <code>?from=&amp;to=&amp;source=official|market</code>." : "One pair day by day; <code>?from=&amp;to=&amp;source=official|market</code>."}</dd>
-<dt><code><a href="/v1/convert?amount=100&amp;from=USD&amp;to=UYU&amp;source=official">/v1/convert?amount=100&amp;from=USD&amp;to=UYU</a></code></dt><dd>${lang === "es" ? "Un monto en otra moneda; <code>source=official|market</code>, <code>side=buy|sell|mid</code>." : "An amount in another currency; <code>source=official|market</code>, <code>side=buy|sell|mid</code>."}</dd>
-<dt><code><a href="/v1/official">/v1/official</a></code> · <code><a href="/v1/market">/v1/market</a></code></dt><dd>${lang === "es" ? "Lo que dijo cada fuente: el BCU en pesos por moneda, el mercado en monedas por dólar." : "What each source said: the BCU in pesos per currency, the market in currencies per dollar."}</dd>
-<dt><code><a href="/v1/currencies">/v1/currencies</a></code> · <code><a href="/v1/status">/v1/status</a></code></dt><dd>${lang === "es" ? "Las monedas, y las últimas lecturas." : "The currencies, and the last readings."}</dd>
+<dt><code><a href="${base}/pairs">${base}/pairs</a></code></dt><dd>${lang === "es" ? "Los pares con la cotización oficial (compra y venta) y la de mercado. <code>?date=AAAA-MM-DD</code> para otro día." : "The pairs with the official rate (buy and sell) and the market's. <code>?date=YYYY-MM-DD</code> for another day."}</dd>
+<dt><code><a href="${base}/pairs/USD-UYU/history">${base}/pairs/USD-UYU/history</a></code></dt><dd>${lang === "es" ? "Un par día por día; <code>?from=&amp;to=&amp;source=official|market</code>." : "One pair day by day; <code>?from=&amp;to=&amp;source=official|market</code>."}</dd>
+<dt><code><a href="${base}/convert?amount=100&amp;from=USD&amp;to=UYU&amp;source=official">${base}/convert?amount=100&amp;from=USD&amp;to=UYU</a></code></dt><dd>${lang === "es" ? "Un monto en otra moneda; <code>source=official|market</code>, <code>side=buy|sell|mid</code>." : "An amount in another currency; <code>source=official|market</code>, <code>side=buy|sell|mid</code>."}</dd>
+<dt><code><a href="${base}/official">${base}/official</a></code> · <code><a href="${base}/market">${base}/market</a></code></dt><dd>${lang === "es" ? "Lo que dijo cada fuente: el BCU en pesos por moneda, el mercado en monedas por dólar." : "What each source said: the BCU in pesos per currency, the market in currencies per dollar."}</dd>
+<dt><code><a href="${base}/currencies">${base}/currencies</a></code> · <code><a href="${base}/status">${base}/status</a></code></dt><dd>${lang === "es" ? "Las monedas, y las últimas lecturas." : "The currencies, and the last readings."}</dd>
 </dl>
 ${o.footer ?? ""}`;
   const script = `
-var LANG=${JSON.stringify(lang)},T=${JSON.stringify(t)},src='official',O=null,M=null,C=[];
+var B=${JSON.stringify(base)},LANG=${JSON.stringify(lang)},T=${JSON.stringify(t)},src='official',O=null,M=null,C=[];
 function cross(b,q){if(src==='market'){if(!M)return null;var f=M.perUsd[b],t=M.perUsd[q];return f>0&&t>0?{rate:t/f,day:M.day}:null}
  if(!O)return null;var d=O.published[b+'/'+q];if(d)return{rate:d.sell,day:O.day};var a=O.perLocal[b],c=O.perLocal[q];if(!a||!c)return null;return{rate:a.sell/c.buy,day:O.day}}
 function fill(){var f=document.getElementById('from'),t=document.getElementById('to');var list=src==='market'&&M?Object.keys(M.perUsd).sort():C.map(function(c){return c.iso});
  var names={};C.forEach(function(c){names[c.iso]=c.name});var keep=[f.value||'USD',t.value||'UYU'];
  [f,t].forEach(function(s,i){s.innerHTML=list.map(function(iso){return'<option value="'+iso+'">'+iso+(names[iso]?' · '+esc(names[iso]):'')+'</option>'}).join('');if(list.indexOf(keep[i])>=0)s.value=keep[i]});calc()}
 function calc(){var a=Number(document.getElementById('amount').value),b=document.getElementById('from').value,q=document.getElementById('to').value,r=b===q?{rate:1,day:''}:cross(b,q),out=document.getElementById('result'),line=document.getElementById('rateline');
- if(!r){out.textContent='';line.textContent=T.noRate;return}
+ if(!r){out.textContent='—';line.textContent=T.noRate;return}
  var places=(C.find(function(c){return c.iso===q})||{places:2}).places;out.textContent=new Intl.NumberFormat(LANG,{style:'currency',currency:q,currencyDisplay:'code',maximumFractionDigits:places}).format(a*r.rate);
  line.textContent=T.rateLine.replace('{from}',b).replace('{rate}',fmtRate(r.rate,LANG)).replace('{to}',q)+(r.day?' · '+fmtDay(r.day,LANG):'')}
 function card(p){var o=p.official?'<div class="fig"><span>'+T.official+' · '+T.buy+'</span><b>'+fmtRate(p.official.buy,LANG)+'</b></div><div class="fig"><span>'+T.sell+'</span><b>'+fmtRate(p.official.sell,LANG)+'</b></div>':'';
  var m=p.market?'<div class="fig"><span>'+T.market+'</span><b>'+fmtRate(p.market.rate,LANG)+'</b></div>':'';var day=(p.official||p.market||{}).day;
  return'<div class="card pair"><h3>'+(p.favourite?'<span class="star">★</span> ':'')+esc(p.pair)+'</h3><div class="figs">'+o+m+'</div>'+(day?'<p class="muted small" style="margin-top:8px">'+fmtDay(day,LANG)+'</p>':'')+'</div>'}
-Promise.all(['/v1/pairs','/v1/currencies?lang='+LANG,'/v1/official','/v1/market'].map(function(u){return fetch(u).then(function(r){return r.ok?r.json():null}).catch(function(){return null})})).then(function(a){
+Promise.all([B+'/pairs',B+'/currencies?lang='+LANG,B+'/official',B+'/market'].map(function(u){return fetch(u).then(function(r){return r.ok?r.json():null}).catch(function(){return null})})).then(function(a){
  var ps=a[0]&&a[0].pairs||[];C=a[1]&&a[1].currencies||[];O=a[2];M=a[3];
  document.getElementById('pairs').innerHTML=ps.length?ps.sort(function(x,y){return y.favourite-x.favourite}).map(card).join(''):'<p class="muted">'+T.none+'</p>';fill()});
 document.querySelectorAll('[data-src]').forEach(function(b){b.onclick=function(){src=b.dataset.src;document.querySelectorAll('[data-src]').forEach(function(x){x.setAttribute('aria-pressed',x===b)});fill()}});
@@ -144,7 +144,7 @@ document.getElementById('swap').onclick=function(){var f=document.getElementById
   return shell(lang, o.title, body, script);
 }
 
-export function adminPage(lang: Lang, o: PageOptions): string {
+export function adminPage(lang: Lang, o: PageOptions, base: string): string {
   const t = TEXT[lang];
   const body = `
 <h1>${esc(o.title)} · ${t.admin}</h1>
@@ -162,14 +162,14 @@ export function adminPage(lang: Lang, o: PageOptions): string {
   <h2>${t.runs}</h2><ul id="runs" class="small" style="padding-left:18px"></ul>
 </div>`;
   const script = `
-var LANG=${JSON.stringify(lang)},T=${JSON.stringify(t)},KEY='cambista-token',token=sessionStorage.getItem(KEY)||'',D=null;
-function api(method,body){var h={'Content-Type':'application/json'};if(token)h.Authorization='Bearer '+token;return fetch('/v1/admin?lang='+LANG,{method:method,credentials:'same-origin',headers:h,body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){if(r.status===401)throw new Error('401');if(!r.ok)throw new Error(j.error||r.status);return j})})}
+var B=${JSON.stringify(base)},LANG=${JSON.stringify(lang)},T=${JSON.stringify(t)},KEY='exchange-rates-uy-token',token=sessionStorage.getItem(KEY)||'',D=null;
+function api(method,body){var h={'Content-Type':'application/json'};if(token)h.Authorization='Bearer '+token;return fetch(B+'/admin?lang='+LANG,{method:method,credentials:'same-origin',headers:h,body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){if(r.status===401)throw new Error('401');if(!r.ok)throw new Error(j.error||r.status);return j})})}
 function say(s,bad){var m=document.getElementById('msg');m.textContent=s;m.className=(bad?'bad':'muted')+' small'}
 function act(body){return api('POST',body).then(function(){say(T.saved);return load()}).catch(function(e){say(e.message,true)})}
 function load(){return api('GET').then(function(d){D=d;draw()}).catch(function(e){if(e.message==='401'){var had=!!token;sessionStorage.removeItem(KEY);token='';show(false,had?T.wrongToken:'')}else say(e.message,true)})}
 function show(ok,err){document.getElementById('login').hidden=ok;document.getElementById('app').hidden=!ok;document.getElementById('loginerr').textContent=err||''}
 function draw(){show(true);var n=D.pairs.length;
- document.getElementById('pairs').innerHTML=D.pairs.map(function(p,i){return'<tr><td><b>'+esc(p.pair)+'</b></td><td>'+(p.official?fmtRate(p.official.buy,LANG)+' / '+fmtRate(p.official.sell,LANG):'')+'</td><td>'+(p.market?fmtRate(p.market.rate,LANG):'')+'</td>'+
+ document.getElementById('pairs').innerHTML=D.pairs.map(function(p,i){return'<tr><td><b>'+esc(p.pair)+'</b></td><td>'+(p.official?fmtRate(p.official.buy,LANG)+' / '+fmtRate(p.official.sell,LANG):'—')+'</td><td>'+(p.market?fmtRate(p.market.rate,LANG):'—')+'</td>'+
  '<td><input type="checkbox" data-pair="'+esc(p.pair)+'" data-f="active" '+(p.active?'checked':'')+' style="width:auto"></td><td><input type="checkbox" data-pair="'+esc(p.pair)+'" data-f="favourite" '+(p.favourite?'checked':'')+' style="width:auto"></td>'+
  '<td class="row" style="flex-wrap:nowrap"><button data-up="'+i+'" '+(i===0?'disabled':'')+' aria-label="'+T.up+'">↑</button><button data-down="'+i+'" '+(i===n-1?'disabled':'')+' aria-label="'+T.down+'">↓</button><button data-rev="'+esc(p.pair)+'">'+T.reverse+'</button></td></tr>'}).join('');
  document.getElementById('currencies').innerHTML=D.currencies.map(function(c){return'<tr><td><b>'+c.iso+'</b>'+(c.official?' <span class="muted small">'+T.quotedByBcu+'</span>':'')+'</td><td>'+esc(c.name)+'</td><td><input data-sym="'+c.iso+'" value="'+esc(c.ownSymbol||'')+'" placeholder="'+esc(c.symbol)+'" maxlength="4" style="max-width:90px"></td><td><input type="checkbox" data-cur="'+c.iso+'" '+(c.active?'checked':'')+' style="width:auto"></td></tr>'}).join('');

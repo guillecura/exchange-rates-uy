@@ -1,14 +1,14 @@
-name = "cambista"
+name = "exchange-rates"
 main = "src/index.ts"
 compatibility_date = "2026-11-01"
 
-# npx wrangler d1 create cambista   → paste its database_id here
+# npx wrangler d1 create exchange-rates   → paste its database_id here
 [[d1_databases]]
 binding = "DB"
-database_name = "cambista"
+database_name = "exchange-rates"
 database_id = "REPLACE-WITH-YOUR-DATABASE-ID"
 
-# The trigger only wakes it; the schedule decides what is read.
+# Only wakes it: the schedule decides what is read.
 [triggers]
 crons = ["*/15 * * * *"]
 

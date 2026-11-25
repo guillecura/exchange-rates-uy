@@ -14,6 +14,7 @@ export interface D1Like {
 /** A store on a D1 database (the binding from `wrangler.toml`). */
 export function d1Sql(db: D1Like): Sql {
   return {
+    dialect: "sqlite",
     async all<T>(sql: string, params: readonly unknown[] = []) {
       return (await db.prepare(sql).bind(...params).all<T>()).results;
     },

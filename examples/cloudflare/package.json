@@ -1,8 +1,8 @@
 {
-  "name": "my-cambista",
+  "name": "my-exchange-rates",
   "private": true,
   "type": "module",
   "scripts": { "deploy": "wrangler deploy", "dev": "wrangler dev" },
-  "dependencies": { "cambista": "^0.1.0" },
+  "dependencies": { "exchange-rates-uy": "^1.0.0" },
   "devDependencies": { "wrangler": "^4.0.0" }
 }

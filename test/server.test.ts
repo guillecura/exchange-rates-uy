@@ -1,20 +1,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createCambista } from "../src/server.ts";
-import { sqliteSql } from "../src/node.ts";
+import { PGlite } from "@electric-sql/pglite";
+import { createExchangeRates, type Sql } from "../src/server.ts";
+import { openSqlite } from "../src/sqlite.ts";
+import { pgSql } from "../src/postgres.ts";
+import { lambdaHandler } from "../src/lambda.ts";
 import { bcuAnswer, dato, fakeFetch, marketAnswer } from "./fixtures.ts";
 
 const TOKEN = "test-token";
 
-function setup() {
-  const sql = sqliteSql(":memory:");
-  const app = createCambista({ sql, adminToken: TOKEN, maxAge: 0 });
+/** Every test runs on both dialects: SQLite (node:sqlite) and Postgres (PGlite, a real Postgres in-process). */
+const BACKENDS: [string, () => Promise<Sql & { close(): void }>][] = [
+  ["sqlite", () => openSqlite(":memory:")],
+  ["postgres", async () => {
+    const pg = new PGlite();
+    return { ...pgSql(pg), close: () => void pg.close() };
+  }],
+];
+
+async function setupWith(open: () => Promise<Sql & { close(): void }>) {
+  const sql = await open();
+  const app = createExchangeRates({ sql, adminToken: TOKEN, cronSecret: "cron", maxAge: 0 });
   const get = async (path: string) => {
     const res = await app.fetch(new Request(`http://x${path}`));
     return { status: res.status, body: await res.json() as any };
   };
   const admin = async (body?: unknown, token = TOKEN) => {
-    const res = await app.fetch(new Request("http://x/v1/admin", {
+    const res = await app.fetch(new Request("http://x/api/admin", {
       method: body ? "POST" : "GET",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
@@ -22,6 +34,10 @@ function setup() {
     return { status: res.status, body: await res.json() as any };
   };
   return { sql, app, get, admin };
+}
+
+function both(title: string, fn: (setup: () => ReturnType<typeof setupWith>) => Promise<void>) {
+  for (const [name, open] of BACKENDS) test(`${name}: ${title}`, () => fn(() => setupWith(open)));
 }
 
 function sources() {
@@ -35,46 +51,46 @@ function sources() {
   );
 }
 
-test("a new database starts with the seed, and the reading fills both sources", async () => {
-  const { app, get, sql } = setup();
+both("a new database starts with the seed, and the reading fills both sources", async (setup) => {
+  const { app, get, sql } = await setup();
   const restore = sources();
   try {
     const read = await app.read();
     assert.ok(!("error" in read.official), JSON.stringify(read.official));
     assert.ok(!("error" in read.market));
-    const pairs = (await get("/v1/pairs?date=2026-11-25")).body.pairs;
+    const pairs = (await get("/api/pairs?date=2026-11-25")).body.pairs;
     assert.deepEqual(pairs.map((p: any) => p.pair), ["USD/UYU", "EUR/UYU", "EUR/USD", "USD/ARS", "USD/BRL"]);
     const usd = pairs[0];
     assert.deepEqual(usd.official, { day: "2026-11-24", buy: 39.5, sell: 41.9 });
     assert.deepEqual(usd.market, { day: "2026-11-23", rate: 40.5 });
     assert.deepEqual(pairs[2].official, { day: "2026-11-24", buy: 1.16, sell: 1.16 }, "the bank's published EUR/USD wins");
-    assert.equal((await get("/v1/market?date=2026-11-25")).body.perUsd.JPY, 155, "the whole market table is kept");
-    assert.equal((await get("/v1/official?date=2026-11-22")).body.day, "2026-11-21", "a day with no reading reads the one before");
+    assert.equal((await get("/api/market?date=2026-11-25")).body.perUsd.JPY, 155, "the whole market table is kept");
+    assert.equal((await get("/api/official?date=2026-11-22")).body.day, "2026-11-21", "a day with no reading reads the one before");
     sql.close();
   } finally {
     restore();
   }
 });
 
-test("convert, and a pair's history from either source", async () => {
-  const { app, get } = setup();
+both("convert, and a pair's history from either source", async (setup) => {
+  const { app, get } = await setup();
   const restore = sources();
   try {
     await app.read();
-    const c = (await get("/v1/convert?amount=100&from=USD&to=UYU&source=official&date=2026-11-25")).body;
+    const c = (await get("/api/convert?amount=100&from=USD&to=UYU&source=official&date=2026-11-25")).body;
     assert.equal(c.result, 4190);
-    assert.equal((await get("/v1/convert?amount=100&from=USD&to=UYU&source=official&side=buy&date=2026-11-25")).body.result, 3950);
-    assert.equal((await get("/v1/convert?amount=1&from=EUR&to=JPY&date=2026-11-25")).body.rate, 155 / 0.86);
-    const h = (await get("/v1/pairs/USD-UYU/history?from=2026-11-01&to=2026-11-30")).body;
+    assert.equal((await get("/api/convert?amount=100&from=USD&to=UYU&source=official&side=buy&date=2026-11-25")).body.result, 3950);
+    assert.equal((await get("/api/convert?amount=1&from=EUR&to=JPY&date=2026-11-25")).body.rate, 155 / 0.86);
+    const h = (await get("/api/pairs/USD-UYU/history?from=2026-11-01&to=2026-11-30")).body;
     assert.deepEqual(h.days.map((d: any) => d.day), ["2026-11-21", "2026-11-24"]);
-    assert.equal((await get("/v1/convert?from=USD&to=ZZZ")).status, 400);
+    assert.equal((await get("/api/convert?from=USD&to=ZZZ")).status, 400);
   } finally {
     restore();
   }
 });
 
-test("the clock reads each due slot once, and only on the days it is set for", async () => {
-  const { app, sql } = setup();
+both("the clock reads each due slot once, and only on the days it is set for", async (setup) => {
+  const { app, sql } = await setup();
   let bcuCalls = 0;
   const restore = fakeFetch(() => { bcuCalls += 1; return bcuAnswer([dato(2225, "2026-11-24", 39.5, 41.9)]); }, () => marketAnswer({ UYU: 40.5 }));
   try {
@@ -91,10 +107,10 @@ test("the clock reads each due slot once, and only on the days it is set for", a
   }
 });
 
-test("the admin API: behind the token, and the panel's rules", async () => {
-  const { admin, get } = setup();
+both("the admin API: behind the token, and the panel's rules", async (setup) => {
+  const { admin, get } = await setup();
   assert.equal((await admin(undefined, "wrong")).status, 401);
-  assert.equal((await get("/v1/admin")).status, 401);
+  assert.equal((await get("/api/admin")).status, 401);
 
   assert.equal((await admin({ kind: "currency", fresh: true, iso: "ZZZ" })).body.error, "bad_iso");
   assert.equal((await admin({ kind: "currency", fresh: true, iso: "USD" })).status, 409);
@@ -115,14 +131,53 @@ test("the admin API: behind the token, and the panel's rules", async () => {
   assert.deepEqual(all.pairs.slice(0, 2).map((p: any) => p.pair), ["JPY/USD", "USD/UYU"]);
   assert.equal(all.pairs.find((p: any) => p.pair === "EUR/USD").active, false);
   assert.ok(!all.catalog.some((c: any) => c.iso === "JPY"), "the catalogue leaves the kept ones out");
-  assert.ok(!(await get("/v1/pairs")).body.pairs.some((p: any) => p.pair === "EUR/USD"), "a retired pair is not public");
+  assert.ok(!(await get("/api/pairs")).body.pairs.some((p: any) => p.pair === "EUR/USD"), "a retired pair is not public");
 });
 
-test("the pages: public always, the panel only with a token", async () => {
-  const { app } = setup();
+both("the pages: public always, the panel only with a token", async (setup) => {
+  const { app } = await setup();
   const home = await app.fetch(new Request("http://x/", { headers: { "accept-language": "es-UY" } }));
   assert.match(await home.text(), /Conversor/);
   assert.equal((await app.fetch(new Request("http://x/admin"))).status, 200);
-  const open = createCambista({ sql: (await import("../src/node.ts")).sqliteSql(":memory:") });
+  const open = createExchangeRates({ sql: await openSqlite(":memory:") });
   assert.equal((await open.fetch(new Request("http://x/admin"))).status, 404, "no token, no panel");
+});
+
+both("a scheduler wakes the clock at /api/tick with the cron secret, nobody else", async (setup) => {
+  const { app } = await setup();
+  const restore = sources();
+  try {
+    assert.equal((await app.fetch(new Request("http://x/api/tick"))).status, 401);
+    const res = await app.fetch(new Request("http://x/api/tick", { headers: { Authorization: "Bearer cron" } }));
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(((await res.json()) as any).read));
+  } finally {
+    restore();
+  }
+});
+
+test("the tables take a prefix, so they sit beside an app's own", async () => {
+  const sql = await openSqlite(":memory:");
+  const app = createExchangeRates({ sql, tablePrefix: "fx_" });
+  await app.fetch(new Request("http://x/api/pairs"));
+  const tables = (await sql.all<{ name: string }>("select name from sqlite_master where type = 'table' order by name")).map((t) => t.name);
+  assert.deepEqual(tables, ["fx_currency", "fx_log", "fx_market", "fx_meta", "fx_official", "fx_pair", "fx_slot"]);
+  assert.throws(() => createExchangeRates({ sql, tablePrefix: "x; drop" }));
+  sql.close();
+});
+
+test("AWS Lambda: an HTTP event is a request, a scheduled one a tick", async () => {
+  const sql = await openSqlite(":memory:");
+  const handler = lambdaHandler({ sql });
+  const http = await handler({ rawPath: "/api/currencies", rawQueryString: "lang=es", requestContext: { http: { method: "GET" }, domainName: "x" } }) as any;
+  assert.equal(http.statusCode, 200);
+  assert.equal(JSON.parse(http.body).currencies[0].iso, "USD");
+  const restore = sources();
+  try {
+    const tick = await handler({ source: "aws.events", time: "2026-11-25T14:00:00Z" }) as any;
+    assert.deepEqual(tick.read, ["official:10", "market:10"]);
+  } finally {
+    restore();
+    sql.close();
+  }
 });

@@ -12,17 +12,27 @@ import {
 /**
  * The HTTP API: `Request` in, `Response` out, the same on Workers, Node and Deno.
  *
- * Public (`GET /v1/...`): anybody may read it, from any origin. Rates are public
- * data, and the point of keeping them in one place is that every app reads them
- * from there.
+ * Public (`GET /api/...`, or wherever `base` puts it): anybody may read it, from
+ * any origin. Rates are public data, and the point of keeping them in one place is
+ * that every app reads them from there.
  *
- * Admin (`/v1/admin`): what the panel does, behind `authorize`. Adding a currency
+ * Clock (`/api/tick`): for a platform whose scheduler calls a URL (Vercel Cron,
+ * Supabase's pg_cron with pg_net, a GitHub Action, crontab and curl), behind the
+ * cron secret or the admin token.
+ *
+ * Admin (`/api/admin`): what the panel does, behind `authorize`. Adding a currency
  * is its ISO code and nothing else (its name, mark and places are the platform's,
- * `cambista/money`); adding a pair is two kept currencies.
+ * `exchange-rates-uy/money`); adding a pair is two kept currencies.
  */
 
 export interface ApiOptions {
+  /** Where the API answers: `/api` unless told otherwise. */
+  base: string;
   schedule: Schedule;
+  /** Whether a request may wake the clock at `{base}/tick` (a platform's cron calling in). */
+  mayTick: (req: Request) => boolean | Promise<boolean>;
+  /** Reads whatever is due now. */
+  tick: () => Promise<string[]>;
   /** Whether a request may use the admin API. */
   authorize: (req: Request) => boolean | Promise<boolean>;
   /** How long a public answer may be cached, in seconds. */
@@ -80,8 +90,9 @@ export async function pairRates(sql: Sql, list: readonly Pair[], day: string) {
 
 export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promise<Response | null> {
   const url = new URL(req.url);
-  const path = url.pathname.replace(/\/+$/, "");
-  if (!path.startsWith("/v1")) return null;
+  const full = url.pathname.replace(/\/+$/, "");
+  if (full !== opts.base && !full.startsWith(`${opts.base}/`)) return null;
+  const path = full.slice(opts.base.length);
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
   const q = (k: string) => url.searchParams.get(k);
@@ -90,34 +101,38 @@ export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promi
   const day = q("date") ?? today;
   if (!isDay(day)) return fail("date is YYYY-MM-DD");
 
-  if (path === "/v1/admin") return admin(req, sql, opts, lang, today);
+  if (path === "/admin") return admin(req, sql, opts, lang, today);
+  if (path === "/tick") {
+    if (!(await opts.mayTick(req))) return fail("unauthorized", 401);
+    return json({ ok: true, read: await opts.tick() });
+  }
   if (req.method !== "GET" && req.method !== "HEAD") return fail("method not allowed", 405);
   const cache = opts.maxAge;
 
   switch (path) {
-    case "/v1":
+    case "":
       return json({
-        endpoints: ["/v1/currencies", "/v1/pairs", "/v1/pairs/USD-UYU/history", "/v1/official", "/v1/market", "/v1/convert", "/v1/status"],
+        endpoints: ["currencies", "pairs", "pairs/USD-UYU/history", "official", "market", "convert", "status"].map((e) => `${opts.base}/${e}`),
         credits: { official: BCU_PAGE, market: MARKET_CREDIT },
       }, 200, cache);
 
-    case "/v1/currencies":
+    case "/currencies":
       return json({ currencies: (await currencies(sql)).map((c) => describe(c, lang)) }, 200, cache);
 
-    case "/v1/pairs":
+    case "/pairs":
       return json({ date: day, pairs: await pairRates(sql, await pairs(sql), day) }, 200, cache);
 
-    case "/v1/official": {
+    case "/official": {
       const o = await officialOn(sql, day);
       return o ? json({ date: day, ...o, quote: BCU_QUOTE, source: BCU_PAGE }, 200, cache) : fail("no official reading up to that day", 404);
     }
 
-    case "/v1/market": {
+    case "/market": {
       const m = await marketOn(sql, day);
       return m ? json({ date: day, ...m, base: "USD", credit: MARKET_CREDIT }, 200, cache) : fail("no market table up to that day", 404);
     }
 
-    case "/v1/convert": {
+    case "/convert": {
       const amount = Number(q("amount") ?? "1");
       const from = (q("from") ?? "").toUpperCase();
       const to = (q("to") ?? "").toUpperCase();
@@ -138,11 +153,11 @@ export async function handleApi(req: Request, sql: Sql, opts: ApiOptions): Promi
       return json({ amount, from, to, date: day, day: m.day, source, rate, result: amount * rate }, 200, cache);
     }
 
-    case "/v1/status":
+    case "/status":
       return json({ freshest: await freshest(sql), runs: await runs(sql, 20) });
   }
 
-  const h = /^\/v1\/pairs\/([A-Za-z]{3})[-_/]([A-Za-z]{3})\/history$/.exec(path);
+  const h = /^\/pairs\/([A-Za-z]{3})[-_/]([A-Za-z]{3})\/history$/.exec(path);
   if (h) {
     const base = h[1]!.toUpperCase();
     const quote = h[2]!.toUpperCase();

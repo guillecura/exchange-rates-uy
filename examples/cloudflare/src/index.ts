@@ -1,4 +1,7 @@
-import { cambistaWorker } from "cambista/worker";
+import { exchangeRatesWorker } from "exchange-rates-uy/worker";
 
-// The whole server. Options: a title, the schedule, the first currencies and pairs (see the README).
-export default cambistaWorker({ page: { title: "Exchange rates" } });
+export default exchangeRatesWorker({
+  page: { title: "Exchange rates" },
+  // A new database's first ones; the panel (/admin) adds the rest.
+  seed: { currencies: ["USD", "UYU", "EUR", "BRL"], pairs: ["USD/UYU", "EUR/UYU", "BRL/UYU"] },
+});
