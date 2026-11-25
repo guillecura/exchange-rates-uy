@@ -1,64 +1,89 @@
 import Foundation
 
-/// Reads an exchange-rates-uy server (github.com/guillecura/exchange-rates-uy): the bank's and the market's rates, the
-/// pairs, a pair's history, a conversion. The same API and names as the server and its JavaScript client.
+/// Exchange rates the same way in two modes, like the package's JavaScript and Kotlin clients:
+///
+/// - With a server, `RatesClient(baseURL:key:)` asks an exchange-rates-uy server (github.com/guillecura/exchange-rates-uy),
+///   which keeps the history and the pairs: yours, or rates.whitebear.io with its key.
+/// - Without one, `RatesClient(pairs:)` reads the sources itself, the BCU and ExchangeRate-API, with the same arithmetic
+///   (`Direct.swift`). The market's past days need a server: the source only gives today's.
 ///
 ///     let rates = RatesClient(baseURL: URL(string: "https://your-server/api")!, key: "…")
+///     let alone = RatesClient(pairs: ["USD/UYU", "EUR/UYU"])
 ///     let bank = try await rates.official()          // the BCU's pesos per unit, buying and selling
 ///     let usd = try await rates.history("USD/UYU", from: "2026-01-01")
 ///
 /// A key in a phone app can be read out of it: it says which app is asking, it does not protect the server.
 public struct RatesClient: Sendable {
-    public let baseURL: URL
-    let key: String?
+    enum Mode: Sendable {
+        case server(URL, key: String?)
+        case direct(Direct)
+    }
+
+    let mode: Mode
     let session: URLSession
 
+    /// On a server: its API's address (`…/api` included) and, when it asks for one, this app's key.
     public init(baseURL: URL, key: String? = nil, session: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.key = key
+        mode = .server(baseURL, key: key)
         self.session = session
+    }
+
+    /// Without a server: the pairs `pairs()` answers and any more currencies to read from the BCU.
+    public init(pairs: [String] = ["USD/UYU", "EUR/UYU", "ARS/UYU", "BRL/UYU"], currencies: [String] = [], session: URLSession = .shared) {
+        mode = .direct(Direct(pairs: pairs, currencies: currencies, session: session))
+        self.session = session
+    }
+
+    /// The server's address, or nil without one.
+    public var baseURL: URL? {
+        if case .server(let url, _) = mode { return url }
+        return nil
     }
 
     /// The bank's reading on `date` (YYYY-MM-DD, the last on or before it; today by default).
     public func official(date: String? = nil) async throws -> Official {
-        try await call("official", ["date": date])
+        if case .direct(let d) = mode { return try await d.official(date: date) }
+        return try await call("official", ["date": date])
     }
 
-    /// The market's table on `date`.
+    /// The market's table on `date` (without a server, only today's).
     public func market(date: String? = nil) async throws -> Market {
-        try await call("market", ["date": date])
+        if case .direct(let d) = mode { return try await d.market(date: date) }
+        return try await call("market", ["date": date])
     }
 
-    /// The server's pairs, each with both rates, on `date`.
+    /// The pairs, each with both rates, on `date`.
     public func pairs(date: String? = nil) async throws -> [PairRate] {
-        struct Answer: Decodable { let pairs: [PairRate] }
-        let answer: Answer = try await call("pairs", ["date": date])
+        if case .direct(let d) = mode { return try await d.pairs(date: date) }
+        let answer: PairsAnswer = try await call("pairs", ["date": date])
         return answer.pairs
     }
 
-    /// The server's currencies, named in `lang`.
+    /// The currencies, named in `lang`.
     public func currencies(lang: String? = nil) async throws -> [Currency] {
-        struct Answer: Decodable { let currencies: [Currency] }
-        let answer: Answer = try await call("currencies", ["lang": lang])
+        if case .direct(let d) = mode { return d.currencies(lang: lang ?? "en") }
+        let answer: CurrenciesAnswer = try await call("currencies", ["lang": lang])
         return answer.currencies
     }
 
     /// One pair (`USD/UYU`), day by day, from one source. At most ten years per call.
     public func history(_ pair: String, from: String? = nil, to: String? = nil, source: Source = .official) async throws -> [HistoryDay] {
-        struct Answer: Decodable { let days: [HistoryDay] }
+        if case .direct(let d) = mode { return try await d.history(pair, from: from, to: to, source: source) }
         let path = "pairs/\(pair.uppercased().replacingOccurrences(of: "/", with: "-"))/history"
-        let answer: Answer = try await call(path, ["from": from, "to": to, "source": source.rawValue])
+        let answer: HistoryAnswer = try await call(path, ["from": from, "to": to, "source": source.rawValue])
         return answer.days
     }
 
     /// An amount in another currency.
     public func convert(_ amount: Double, from: String, to: String, date: String? = nil, source: Source = .market, side: Side? = nil) async throws -> Conversion {
-        try await call("convert", [
+        if case .direct(let d) = mode { return try await d.convert(amount, from: from, to: to, date: date, source: source, side: side ?? .sell) }
+        return try await call("convert", [
             "amount": String(amount), "from": from, "to": to, "date": date, "source": source.rawValue, "side": side?.rawValue,
         ])
     }
 
     func call<T: Decodable>(_ path: String, _ query: [String: String?]) async throws -> T {
+        guard case .server(let baseURL, let key) = mode else { throw RatesError(status: 0, message: "no server") }
         var parts = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         let items = query.compactMap { key, value in value.map { URLQueryItem(name: key, value: $0) } }.sorted { $0.name < $1.name }
         parts.queryItems = items.isEmpty ? nil : items
@@ -73,6 +98,10 @@ public struct RatesClient: Sendable {
         return try JSONDecoder().decode(T.self, from: data)
     }
 }
+
+private struct PairsAnswer: Decodable { let pairs: [PairRate] }
+private struct CurrenciesAnswer: Decodable { let currencies: [Currency] }
+private struct HistoryAnswer: Decodable { let days: [HistoryDay] }
 
 /// The server's answer when it refuses: `{ "error": "…" }`.
 private struct Failure: Decodable {

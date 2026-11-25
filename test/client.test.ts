@@ -29,3 +29,28 @@ test("the client reads a server as an app does: with its key, typed, the server'
     sql.close();
   }
 });
+
+test("without a server the client reads the sources itself, with the server's arithmetic", async () => {
+  const restore = fakeFetch(
+    () => bcuAnswer([dato(2225, "2026-11-24", 39.5, 41.9), dato(1111, "2026-11-24", 44, 47, 1.16)]),
+    () => marketAnswer({ UYU: 40.5, EUR: 0.86, JPY: 155 }),
+  );
+  try {
+    const rates = createRatesClient({ pairs: ["USD/UYU", "EUR/USD"] });
+    const bank = await rates.official("2026-11-25");
+    assert.equal(bank.day, "2026-11-24");
+    assert.deepEqual(bank.perLocal.USD, { buy: 39.5, sell: 41.9 });
+    const pairs = await rates.pairs();
+    assert.deepEqual(pairs.map((p) => p.pair), ["USD/UYU", "EUR/USD"]);
+    assert.deepEqual(pairs[1]!.official && { buy: pairs[1]!.official.buy }, { buy: 1.16 }, "the bank's published EUR/USD wins");
+    assert.equal(pairs[0]!.market?.rate, 40.5);
+    assert.equal((await rates.convert({ amount: 1, from: "EUR", to: "JPY" })).rate, 155 / 0.86);
+    assert.equal((await rates.convert({ amount: 100, from: "USD", to: "UYU", source: "official", date: "2026-11-25" })).result, 4190);
+    assert.deepEqual((await rates.history("USD/UYU", { from: "2026-11-20", to: "2026-11-25" })).map((d) => d.day), ["2026-11-24"]);
+    await assert.rejects(rates.history("USD/UYU", { source: "market" }), (e) => e instanceof RatesError && e.status === 400);
+    await assert.rejects(rates.market("2020-01-01"), (e) => e instanceof RatesError && e.status === 400);
+    assert.deepEqual((await rates.currencies("es")).map((c) => c.iso), ["USD", "UYU", "EUR"]);
+  } finally {
+    restore();
+  }
+});

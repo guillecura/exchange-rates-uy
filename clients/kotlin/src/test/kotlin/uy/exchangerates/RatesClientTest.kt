@@ -61,4 +61,49 @@ class RatesClientTest {
         assertEquals(403, e.status)
         assertEquals("this API is for its allowed sites and keys", e.message)
     }
+
+    private fun sources() {
+        server.removeContext("/")
+        server.createContext("/") { ex ->
+            val body = if (ex.requestURI.path.startsWith("/bcu")) {
+                "<Envelope><status>1</status>" +
+                    "<datoscotizaciones.dato><Fecha>2026-11-24</Fecha><Moneda>2225</Moneda><TCC>39.5</TCC><TCV>41.9</TCV></datoscotizaciones.dato>" +
+                    "<datoscotizaciones.dato><Fecha>2026-11-24</Fecha><Moneda>1111</Moneda><TCC>44</TCC><TCV>47</TCV><ArbAct>1.16</ArbAct></datoscotizaciones.dato></Envelope>"
+            } else {
+                """{"result":"success","time_last_update_unix":1795478551,"rates":{"USD":1,"UYU":40.5,"EUR":0.86,"JPY":155}}"""
+            }
+            val bytes = body.toByteArray()
+            ex.sendResponseHeaders(200, bytes.size.toLong())
+            ex.responseBody.use { it.write(bytes) }
+        }
+    }
+
+    private fun direct(): RatesClient {
+        val root = "http://127.0.0.1:${server.address.port}"
+        return RatesClient.direct(Direct(listOf("USD/UYU", "EUR/USD"), emptyList(), 15_000, "$root/bcu", "$root/market"))
+    }
+
+    @Test fun directOfficialAndPairs() = runBlocking {
+        sources()
+        val rates = direct()
+        assertEquals(null, rates.baseUrl)
+        val bank = rates.official("2026-11-25")
+        assertEquals("2026-11-24", bank.day)
+        assertEquals(Spread(39.5, 41.9), bank.perLocal["USD"])
+        val pairs = rates.pairs()
+        assertEquals(listOf("USD/UYU", "EUR/USD"), pairs.map { it.pair })
+        assertEquals(1.16, pairs[1].official?.buy, "the bank's published EUR/USD wins")
+        assertEquals(40.5, pairs[0].market?.rate)
+    }
+
+    @Test fun directConvertAndHistory() = runBlocking {
+        sources()
+        val rates = direct()
+        assertEquals(4190.0, rates.convert(100.0, "USD", "UYU", date = "2026-11-25", source = Source.OFFICIAL).result, 1e-9)
+        assertEquals(155 / 0.86, rates.convert(1.0, "EUR", "JPY").rate, 1e-9)
+        assertEquals(listOf("2026-11-24"), rates.history("USD/UYU", from = "2026-11-20", to = "2026-11-25").map { it.day })
+        val e = assertFailsWith<RatesException> { rates.history("USD/UYU", source = Source.MARKET) }
+        assertEquals(400, e.status)
+        assertEquals(listOf("USD", "UYU", "EUR"), rates.currencies("es").map { it.iso })
+    }
 }

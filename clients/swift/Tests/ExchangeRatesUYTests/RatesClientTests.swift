@@ -61,4 +61,55 @@ final class RatesClientTests: XCTestCase {
             XCTFail("\(error)")
         }
     }
+
+    func direct() -> RatesClient {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [Stub.self]
+        return RatesClient(pairs: ["USD/UYU", "EUR/USD"], session: URLSession(configuration: config))
+    }
+
+    static let bcu = """
+    <Envelope><status>1</status>\
+    <datoscotizaciones.dato><Fecha>2026-11-24</Fecha><Moneda>2225</Moneda><TCC>39.5</TCC><TCV>41.9</TCV></datoscotizaciones.dato>\
+    <datoscotizaciones.dato><Fecha>2026-11-24</Fecha><Moneda>1111</Moneda><TCC>44</TCC><TCV>47</TCV><ArbAct>1.16</ArbAct></datoscotizaciones.dato></Envelope>
+    """
+
+    func sources() {
+        Stub.answer = { req in
+            if req.url?.host == "cotizaciones.bcu.gub.uy" { return (200, RatesClientTests.bcu) }
+            return (200, #"{"result":"success","time_last_update_unix":1795478551,"rates":{"USD":1,"UYU":40.5,"EUR":0.86,"JPY":155}}"#)
+        }
+    }
+
+    func testDirectOfficialAndPairs() async throws {
+        sources()
+        let rates = direct()
+        XCTAssertNil(rates.baseURL)
+        let bank = try await rates.official(date: "2026-11-25")
+        XCTAssertEqual(bank.day, "2026-11-24")
+        XCTAssertEqual(bank.perLocal["USD"], Spread(buy: 39.5, sell: 41.9))
+        let pairs = try await rates.pairs()
+        XCTAssertEqual(pairs.map(\.pair), ["USD/UYU", "EUR/USD"])
+        XCTAssertEqual(pairs[1].official?.buy, 1.16, "the bank's published EUR/USD wins")
+        XCTAssertEqual(pairs[0].market?.rate, 40.5)
+    }
+
+    func testDirectConvertAndHistory() async throws {
+        sources()
+        let rates = direct()
+        let official = try await rates.convert(100, from: "USD", to: "UYU", date: "2026-11-25", source: .official)
+        XCTAssertEqual(official.result, 4190, accuracy: 1e-9)
+        let market = try await rates.convert(1, from: "EUR", to: "JPY")
+        XCTAssertEqual(market.rate, 155 / 0.86, accuracy: 1e-9)
+        let days = try await rates.history("USD/UYU", from: "2026-11-20", to: "2026-11-25")
+        XCTAssertEqual(days.map(\.day), ["2026-11-24"])
+        do {
+            _ = try await rates.history("USD/UYU", source: .market)
+            XCTFail("the market's history needs a server")
+        } catch let e as RatesError {
+            XCTAssertEqual(e.status, 400)
+        }
+        let currencies = try await rates.currencies(lang: "es")
+        XCTAssertEqual(currencies.map(\.iso), ["USD", "UYU", "EUR"])
+    }
 }

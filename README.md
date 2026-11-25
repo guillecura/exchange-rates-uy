@@ -242,7 +242,10 @@ What a browser says about where a call comes from stops other web pages from usi
 
 ## Connect an app
 
-One package, three clients, all in this repository with the same calls and names (`official`, `market`, `pairs`, `currencies`, `history`, `convert`), for any exchange-rates-uy server (yours, or rates.whitebear.io with its key):
+One package, three clients, all in this repository, with the same calls and names (`official`, `market`, `pairs`, `currencies`, `history`, `convert`) and **two ways to answer them**:
+
+- **With a server**: give the client its address. It asks your exchange-rates-uy server, which keeps the history, the pairs you chose and the market's past days. This is how Whitebear's apps read [rates.whitebear.io](https://rates.whitebear.io).
+- **Without one**: give it nothing, or the pairs you want. It reads the BCU and the market itself, with the same arithmetic the server uses. Nothing to deploy. What it cannot do alone: the market's past days (the source only gives today's; a server keeps each one), and the BCU from a web page (the bank lets no other site call it; on a phone, a server or a script it is fine).
 
 | Platform | Install from this repository |
 | --- | --- |
@@ -255,21 +258,25 @@ One package, three clients, all in this repository with the same calls and names
 ```ts
 import { createRatesClient } from "exchange-rates-uy/client";
 
-const rates = createRatesClient({ baseUrl: "https://your-server/api", key: process.env.RATES_API_KEY });
+const rates = createRatesClient({ baseUrl: "https://your-server/api", key: process.env.RATES_API_KEY }); // with a server
+const alone = createRatesClient({ pairs: ["USD/UYU", "EUR/UYU"] });                                     // without one
+
 const bank = await rates.official();                       // the BCU's pesos per unit, buying and selling
 const market = await rates.market();                       // every currency per dollar
 const usd = await rates.history("USD/UYU", { from: "2026-01-01" });
 await rates.convert({ amount: 100, from: "USD", to: "UYU", source: "official" });
 ```
 
-In Deno without npm: `https://raw.githubusercontent.com/guillecura/exchange-rates-uy/<tag>/src/client.ts` (it imports nothing).
+In Deno without npm: `https://raw.githubusercontent.com/guillecura/exchange-rates-uy/<tag>/src/client.ts`.
 
 **Swift** (iOS 15, macOS 12; in Xcode, **File › Add Package Dependencies…** with this repository's URL)
 
 ```swift
 import ExchangeRatesUY
 
-let rates = RatesClient(baseURL: URL(string: "https://your-server/api")!, key: "…")
+let rates = RatesClient(baseURL: URL(string: "https://your-server/api")!, key: "…")   // with a server
+let alone = RatesClient(pairs: ["USD/UYU", "EUR/UYU"])                                // without one
+
 let bank = try await rates.official()                      // bank.perLocal["USD"]: Spread(buy:sell:)
 let market = try await rates.market()                      // market.perLocal()["EUR"]: pesos per euro
 let usd = try await rates.history("USD/UYU", from: "2026-01-01")
@@ -279,15 +286,17 @@ let usd = try await rates.history("USD/UYU", from: "2026-01-01")
 
 ```kotlin
 // settings.gradle.kts: repositories { maven("https://jitpack.io") }
-// build.gradle.kts:    implementation("com.github.guillecura:exchange-rates-uy:v1.4.0")
+// build.gradle.kts:    implementation("com.github.guillecura:exchange-rates-uy:v1.5.0")
 import uy.exchangerates.RatesClient
 
-val rates = RatesClient("https://your-server/api", key = "…")
+val rates = RatesClient("https://your-server/api", key = "…")           // with a server
+val alone = RatesClient.direct(listOf("USD/UYU", "EUR/UYU"))           // without one
+
 val bank = rates.official()                                // suspends, on Dispatchers.IO
 val usd = rates.history("USD/UYU", from = "2026-01-01")
 ```
 
-A refused call fails with the status and the server's own words (`RatesError`, `RatesError`, `RatesException`). A key belongs on a server: in a phone app it can be read out of the binary, so there it only says which app is asking; give each app its own.
+A refused call fails with the status and the server's own words (`RatesError`, `RatesError`, `RatesException`). A key belongs on a server: in a phone app it can be read out of the binary, so there it only says which app is asking; give each app its own. Showing the market's figures? Keep its credit beside them ("Rates By Exchange Rate API"): `market.credit` carries it.
 
 ## The library
 

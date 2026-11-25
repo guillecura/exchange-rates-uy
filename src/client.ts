@@ -1,17 +1,21 @@
 /**
- * The client: what an app uses to read an exchange-rates-uy server, the same way from anywhere (a Supabase Edge
- * Function, a Worker, Node, a browser). Typed, with the server's own names, and with the key when the server asks for
- * one (`access`).
+ * The client: what an app uses to read exchange rates, the same calls in two ways.
+ *
+ *   With a server (`baseUrl`): it asks an exchange-rates-uy server, which keeps the history and the pairs (yours, or
+ *   rates.whitebear.io with its key).
+ *   Without one: it reads the sources itself, the BCU and the market, with the same arithmetic the server uses
+ *   (`direct.ts`). The market's past days need a server (the source only gives today's), and in a browser the BCU
+ *   refuses other pages (no CORS), so there the direct way works on a server (Node, Deno, Workers) only.
  *
  *   import { createRatesClient } from "exchange-rates-uy/client";
  *   const rates = createRatesClient({ baseUrl: "https://rates.whitebear.io/api", key: Deno.env.get("RATES_API_KEY") });
+ *   const alone = createRatesClient({ pairs: ["USD/UYU", "EUR/UYU"] });   // no server
  *   const bank = await rates.official();                 // the BCU's pesos per unit, buying and selling
- *   const market = await rates.market("2026-11-20");     // every currency per dollar, that day
  *   const usd = await rates.history("USD/UYU", { from: "2026-01-01" });
  *
- * This file imports nothing, so Deno can also take it straight from the repository:
- * `https://raw.githubusercontent.com/guillecura/exchange-rates-uy/<tag>/src/client.ts`.
+ * Deno can take it straight from the repository: `https://raw.githubusercontent.com/guillecura/exchange-rates-uy/<tag>/src/client.ts`.
  */
+import { createDirectClient, type DirectOptions } from "./direct.ts";
 
 export interface Spread {
   buy: number;
@@ -66,7 +70,7 @@ export interface Conversion {
   result: number;
 }
 
-export interface RatesClientOptions {
+export interface ServerOptions {
   /** The API's address, `…/api` included: `https://rates.whitebear.io/api`. */
   baseUrl: string;
   /** The server-side caller's key, when the server asks for one. Never put it in a browser. */
@@ -87,9 +91,40 @@ export class RatesError extends Error {
   }
 }
 
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
+export type RatesClientOptions = ServerOptions | DirectOptions;
 
-export function createRatesClient(o: RatesClientOptions) {
+/** The same calls whichever way it reads. */
+export interface RatesClient {
+  /** The bank's reading on `date` (the last on or before it; today by default). */
+  official(date?: string): Promise<Official>;
+  /** The market's table on `date` (without a server, only today's). */
+  market(date?: string): Promise<Market>;
+  /** The pairs, each with both rates, on `date`. */
+  pairs(date?: string): Promise<PairRate[]>;
+  /** The currencies, named in `lang`. */
+  currencies(lang?: string): Promise<Currency[]>;
+  /** One pair, day by day, from one source (the bank's by default). At most ten years per call. */
+  history(pair: string, opts?: { from?: string; to?: string; source?: "official" | "market" }): Promise<HistoryDay[]>;
+  /** An amount in another currency. */
+  convert(opts: { amount: number; from: string; to: string; date?: string; source?: "official" | "market"; side?: "buy" | "sell" | "mid" }): Promise<Conversion>;
+  /** The newest day of each source. */
+  status(): Promise<{ freshest: { official: string | null; market: string | null } }>;
+}
+
+export interface HistoryDay {
+  day: string;
+  buy: number;
+  sell: number;
+}
+
+export const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A client: on a server when given its `baseUrl`, else reading the sources itself. */
+export function createRatesClient(o: RatesClientOptions = {}): RatesClient {
+  return "baseUrl" in o && o.baseUrl ? serverClient(o) : createDirectClient(o as DirectOptions);
+}
+
+function serverClient(o: ServerOptions): RatesClient {
   const base = o.baseUrl.replace(/\/+$/, "");
   const call = async <T>(path: string, query: Record<string, string | number | undefined> = {}): Promise<T> => {
     const q = Object.entries(query).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
@@ -108,28 +143,18 @@ export function createRatesClient(o: RatesClientOptions) {
   const pairPath = (pair: string) => pair.toUpperCase().replace("/", "-");
 
   return {
-    /** The bank's reading on `date` (the last on or before it; today by default). */
-    official: (date?: string) => call<Official>("/official", { date: day(date) }),
-    /** The market's table on `date`. */
-    market: (date?: string) => call<Market>("/market", { date: day(date) }),
-    /** The server's pairs, each with both rates, on `date`. */
-    pairs: (date?: string) => call<{ date: string; pairs: PairRate[] }>("/pairs", { date: day(date) }).then((r) => r.pairs),
-    /** The server's currencies, named in `lang`. */
-    currencies: (lang?: string) => call<{ currencies: Currency[] }>("/currencies", { lang }).then((r) => r.currencies),
-    /** One pair, day by day, from one source (the bank's by default). At most ten years per call. */
-    history: (pair: string, opts: { from?: string; to?: string; source?: "official" | "market" } = {}) =>
-      call<{ days: { day: string; buy: number; sell: number }[] }>(`/pairs/${pairPath(pair)}/history`, {
-        from: day(opts.from), to: day(opts.to), source: opts.source,
-      }).then((r) => r.days),
-    /** An amount in another currency. */
-    convert: (opts: { amount: number; from: string; to: string; date?: string; source?: "official" | "market"; side?: "buy" | "sell" | "mid" }) =>
+    official: (date) => call<Official>("/official", { date: day(date) }),
+    market: (date) => call<Market>("/market", { date: day(date) }),
+    pairs: (date) => call<{ date: string; pairs: PairRate[] }>("/pairs", { date: day(date) }).then((r) => r.pairs),
+    currencies: (lang) => call<{ currencies: Currency[] }>("/currencies", { lang }).then((r) => r.currencies),
+    history: (pair, opts = {}) =>
+      call<{ days: HistoryDay[] }>(`/pairs/${pairPath(pair)}/history`, { from: day(opts.from), to: day(opts.to), source: opts.source })
+        .then((r) => r.days),
+    convert: (opts) =>
       call<Conversion>("/convert", { amount: opts.amount, from: opts.from, to: opts.to, date: day(opts.date), source: opts.source, side: opts.side }),
-    /** The newest day of each source, and the last readings. */
     status: () => call<{ freshest: { official: string | null; market: string | null } }>("/status"),
   };
 }
-
-export type RatesClient = ReturnType<typeof createRatesClient>;
 
 /** Pesos (or any `local`) per unit of each currency, from the market's table: the local column over the currency's. */
 export function perLocal(market: Pick<Market, "perUsd">, local = "UYU"): Record<string, number> {

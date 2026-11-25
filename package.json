@@ -1,6 +1,6 @@
 {
   "name": "exchange-rates-uy",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Uruguay's exchange rates, self-hosted: the official one (Banco Central del Uruguay) and the market's, any pair, customizable pairs and schedule, an API, a public page and a panel. Any backend: SQLite, Postgres (Supabase, Neon, Vercel, RDS), Cloudflare D1; Node, Workers, Lambda, Vercel, Deno, Bun.",
   "keywords": [
     "android",
