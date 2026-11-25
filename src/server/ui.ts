@@ -129,7 +129,7 @@ function fill(){var f=document.getElementById('from'),t=document.getElementById(
  var names={};C.forEach(function(c){names[c.iso]=c.name});var keep=[f.value||'USD',t.value||'UYU'];
  [f,t].forEach(function(s,i){s.innerHTML=list.map(function(iso){return'<option value="'+iso+'">'+iso+(names[iso]?' · '+esc(names[iso]):'')+'</option>'}).join('');if(list.indexOf(keep[i])>=0)s.value=keep[i]});calc()}
 function calc(){var a=Number(document.getElementById('amount').value),b=document.getElementById('from').value,q=document.getElementById('to').value,r=b===q?{rate:1,day:''}:cross(b,q),out=document.getElementById('result'),line=document.getElementById('rateline');
- if(!r){out.textContent='—';line.textContent=T.noRate;return}
+ if(!r){out.textContent='';line.textContent=T.noRate;return}
  var places=(C.find(function(c){return c.iso===q})||{places:2}).places;out.textContent=new Intl.NumberFormat(LANG,{style:'currency',currency:q,currencyDisplay:'code',maximumFractionDigits:places}).format(a*r.rate);
  line.textContent=T.rateLine.replace('{from}',b).replace('{rate}',fmtRate(r.rate,LANG)).replace('{to}',q)+(r.day?' · '+fmtDay(r.day,LANG):'')}
 function card(p){var o=p.official?'<div class="fig"><span>'+T.official+' · '+T.buy+'</span><b>'+fmtRate(p.official.buy,LANG)+'</b></div><div class="fig"><span>'+T.sell+'</span><b>'+fmtRate(p.official.sell,LANG)+'</b></div>':'';
@@ -169,7 +169,7 @@ function act(body){return api('POST',body).then(function(){say(T.saved);return l
 function load(){return api('GET').then(function(d){D=d;draw()}).catch(function(e){if(e.message==='401'){var had=!!token;sessionStorage.removeItem(KEY);token='';show(false,had?T.wrongToken:'')}else say(e.message,true)})}
 function show(ok,err){document.getElementById('login').hidden=ok;document.getElementById('app').hidden=!ok;document.getElementById('loginerr').textContent=err||''}
 function draw(){show(true);var n=D.pairs.length;
- document.getElementById('pairs').innerHTML=D.pairs.map(function(p,i){return'<tr><td><b>'+esc(p.pair)+'</b></td><td>'+(p.official?fmtRate(p.official.buy,LANG)+' / '+fmtRate(p.official.sell,LANG):'—')+'</td><td>'+(p.market?fmtRate(p.market.rate,LANG):'—')+'</td>'+
+ document.getElementById('pairs').innerHTML=D.pairs.map(function(p,i){return'<tr><td><b>'+esc(p.pair)+'</b></td><td>'+(p.official?fmtRate(p.official.buy,LANG)+' / '+fmtRate(p.official.sell,LANG):'')+'</td><td>'+(p.market?fmtRate(p.market.rate,LANG):'')+'</td>'+
  '<td><input type="checkbox" data-pair="'+esc(p.pair)+'" data-f="active" '+(p.active?'checked':'')+' style="width:auto"></td><td><input type="checkbox" data-pair="'+esc(p.pair)+'" data-f="favourite" '+(p.favourite?'checked':'')+' style="width:auto"></td>'+
  '<td class="row" style="flex-wrap:nowrap"><button data-up="'+i+'" '+(i===0?'disabled':'')+' aria-label="'+T.up+'">↑</button><button data-down="'+i+'" '+(i===n-1?'disabled':'')+' aria-label="'+T.down+'">↓</button><button data-rev="'+esc(p.pair)+'">'+T.reverse+'</button></td></tr>'}).join('');
  document.getElementById('currencies').innerHTML=D.currencies.map(function(c){return'<tr><td><b>'+c.iso+'</b>'+(c.official?' <span class="muted small">'+T.quotedByBcu+'</span>':'')+'</td><td>'+esc(c.name)+'</td><td><input data-sym="'+c.iso+'" value="'+esc(c.ownSymbol||'')+'" placeholder="'+esc(c.symbol)+'" maxlength="4" style="max-width:90px"></td><td><input type="checkbox" data-cur="'+c.iso+'" '+(c.active?'checked':'')+' style="width:auto"></td></tr>'}).join('');
