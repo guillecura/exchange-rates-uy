@@ -363,6 +363,8 @@ A day before the server started reading the market, or one a reading missed, com
 
 ## Credits
 
+This package only reads the sources; it holds no licence for them. Whoever runs it, a server or an app in direct mode, reads Banco Central del Uruguay and ExchangeRate-API on their own behalf and answers for following their terms (ExchangeRate-API's include the credit below and not republishing its tables).
+
 - Official rates: [Banco Central del Uruguay](https://www.bcu.gub.uy/Estadisticas-e-Indicadores/Paginas/Cotizaciones.aspx).
 - Market rates: [Rates By Exchange Rate API](https://www.exchangerate-api.com). Their free tier asks for this credit beside their figures, and the public page shows it: keep it if you build your own.
 - The market's past days: this package's archive, public domain (CC0); a `past` day's `credit` points here.
